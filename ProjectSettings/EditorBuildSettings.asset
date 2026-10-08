@@ -6,7 +6,13 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Scenes/EOSAT_Visualization.unity
+    guid: 45a581d3b13112f4da13cdae56548854
+  - enabled: 1
     path: Assets/Scenes/SampleScene.unity
     guid: 99c9720ab356a0642a771bea13969a05
   m_configObjects:
+    com.unity.dt.app-ui: {fileID: 11400000, guid: 1b1c20d82303e4b5781c3ef50ac1449f, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 368ba2577c978f74cb59b4b152028f9b, type: 2}
+    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: 3dee9762c59b55842a85052c5777681a, type: 2}

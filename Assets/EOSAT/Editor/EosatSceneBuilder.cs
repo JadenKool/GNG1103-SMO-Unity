@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -167,6 +167,7 @@ namespace Eosat.EditorTools
             var hud = hudGo.AddComponent<Eosat.HudController>();
             hud.spacecraft = ctrl; hud.hub = hub; hud.deployables = deploy;
 
+            EosatMarkerSetup.ApplyToActiveScene(); // Concept 4 yellow dot + client data replay
             EditorSceneManager.SaveScene(scene, ScenePath);
             AddToBuildSettings(ScenePath);
             AssetDatabase.SaveAssets();

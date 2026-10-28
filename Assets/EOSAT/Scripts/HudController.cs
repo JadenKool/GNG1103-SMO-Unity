@@ -103,7 +103,9 @@ namespace Eosat
                    : Describe(deployables.Antenna.ToString(), deployables.AntennaMoving, deployables.AntennaFraction))
                 : "?";
             string power = spacecraft.InEclipse ? "<color=#8899ff>ECLIPSE</color>" : "<color=#ffe066>SUNLIGHT</color>";
-            return $"Panels {panels}     Antenna {antenna}     {power}     Spin {spacecraft.PhysicalSpinDegPerSec:F1} deg/s";
+            var s = spacecraft.Latest;
+            string mode = s != null && !string.IsNullOrEmpty(s.aocsMode) ? $"     AOCS {s.aocsMode}" : "";
+            return $"Panels {panels}     Antenna {antenna}     {power}     Spin {spacecraft.PhysicalSpinDegPerSec:F1} deg/s{mode}";
         }
 
         static string Describe(string state, bool moving, float fraction) =>

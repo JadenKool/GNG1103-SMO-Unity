@@ -10,6 +10,8 @@ namespace Eosat
     /// <summary>
     /// Background TCP client that splits the incoming stream into complete JSON objects
     /// (works whether or not the sender puts newlines between messages) and auto-reconnects.
+    /// Objects must sit on one line (NDJSON, as the client's smo-vr/1 simulator sends); a newline
+    /// inside an unfinished object marks it as truncated.
     /// </summary>
     public class TcpJsonClient
     {
@@ -76,6 +78,14 @@ namespace Eosat
             while (running && (c = reader.Read()) != -1)
             {
                 char ch = (char)c;
+                if (ch == '\n' && depth > 0)
+                {
+                    // smo-vr/1 is newline-delimited: a line that ends before its '}' is a truncated message.
+                    // Hand it on so the parser rejects it (counted as bad), then start fresh on the next line.
+                    messages.Enqueue(sb.ToString());
+                    sb.Clear(); depth = 0; inString = false; escape = false;
+                    continue;
+                }
                 if (depth == 0 && ch != '{') continue; // skip whitespace/newlines between objects
                 sb.Append(ch);
                 if (inString)
@@ -92,7 +102,7 @@ namespace Eosat
                     messages.Enqueue(sb.ToString());
                     sb.Clear();
                 }
-                if (sb.Length > 65536) { sb.Clear(); depth = 0; } // runaway garbage guard
+                if (sb.Length > 65536) { sb.Clear(); depth = 0; inString = false; escape = false; } // runaway garbage guard
             }
         }
     }

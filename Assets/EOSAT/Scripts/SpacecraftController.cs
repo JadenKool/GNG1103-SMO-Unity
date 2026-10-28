@@ -39,7 +39,11 @@ namespace Eosat
         public bool Predicting { get; private set; }
         public float SecondsSinceData => HasData ? Time.time - lastSampleReal : 0f;
         public double DisplayUnix { get; private set; }
-        public float AltitudeKm => dispPos.magnitude / unitsPerKm - (float)EciMath.EarthRadiusKm;
+        // Uses the simulator's own Earth radius when it sends one (client uses 6371 km), so altitude matches its alt_km.
+        public float AltitudeKm => dispPos.magnitude / unitsPerKm
+            - (latest != null && latest.earthRadiusKm > 0f ? latest.earthRadiusKm : (float)EciMath.EarthRadiusKm);
+        /// <summary>Most recent accepted sample (mode, phase, ground station...). Null before first packet.</summary>
+        public TelemetrySample Latest => latest;
         public float VisualSpinDegPerSec { get; private set; }
         public float PhysicalSpinDegPerSec { get; private set; }
         public bool SpinWarning => VisualSpinDegPerSec > spinWarningDegPerSec;
@@ -162,7 +166,15 @@ namespace Eosat
                     Vector3 sunU = EciMath.EciToUnity(EciMath.SunDirectionEci(EciMath.JulianDate(DisplayUnix)));
                     InEclipse = EciMath.InEarthShadow(dispPos / unitsPerKm, sunU);
                 }
-                if (deployables) deployables.SetTargets(latest.panels, latest.antenna);
+                if (deployables)
+                {
+                    if (latest.hasWings)
+                    {
+                        deployables.SetWingFractions(latest.wingPyFraction, latest.wingMyFraction);
+                        deployables.SetTargets(PanelState.Unknown, latest.antenna);
+                    }
+                    else deployables.SetTargets(latest.panels, latest.antenna);
+                }
             }
         }
     }

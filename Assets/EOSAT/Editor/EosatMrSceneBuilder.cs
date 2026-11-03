@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Eosat.MR;
 using Unity.XR.CoreUtils;
 using UnityEditor;
@@ -82,7 +82,7 @@ namespace Eosat.EditorTools
             RenderSettings.sun = sunLight;
 
             // ---------- XR rig with passthrough ----------
-            new GameObject("AR Session").AddComponent<ARSession>();
+            var arSession = new GameObject("AR Session").AddComponent<ARSession>();
 
             var originGo = new GameObject("XR Origin (MR Rig)");
             var origin = originGo.AddComponent<XROrigin>();
@@ -100,7 +100,7 @@ namespace Eosat.EditorTools
             camGo.AddComponent<AudioListener>();
             cam.GetUniversalAdditionalCameraData().renderPostProcessing = false;
             EosatSceneBuilder.AddHeadTracking(camGo);
-            camGo.AddComponent<ARCameraManager>();
+            var arCamera = camGo.AddComponent<ARCameraManager>();
 
             origin.Camera = cam;
             origin.CameraFloorOffsetObject = offset.gameObject;
@@ -312,6 +312,8 @@ namespace Eosat.EditorTools
             fallback.desktopHint = hint.gameObject;
             fallback.tablet = ui;
             fallback.placer = placer;
+            fallback.arComponents = new Behaviour[] { arSession, arCamera, planes, anchors };
+            foreach (var b in fallback.arComponents) b.enabled = false; // switched on at runtime only with a headset
 
             EditorSceneManager.SaveScene(scene, ScenePath);
             AddToBuildSettings(ScenePath);

@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using Unity.XR.CoreUtils;
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
@@ -57,7 +57,7 @@ namespace Eosat.MR
 
         void BeginSearch()
         {
-            if (planeManager) planeManager.enabled = true;
+            if (planeManager && UnityEngine.XR.XRSettings.isDeviceActive) planeManager.enabled = true; // no headset = no planes to scan
             StopAllCoroutines();
             StartCoroutine(SearchRoutine());
         }

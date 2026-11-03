@@ -22,6 +22,8 @@ namespace Eosat.MR
         public GameObject desktopHint;
         public TabletUIController tablet;
         public TabletopAnchorPlacer placer;
+        [Tooltip("AR Session / camera / plane / anchor managers. Saved disabled in the scene and switched on only when a headset is running, so desktop Play has no 'No active XR...Subsystem' warnings.")]
+        public Behaviour[] arComponents;
 
         [Header("Desktop controls")]
         public float moveSpeed = 0.6f;
@@ -36,7 +38,12 @@ namespace Eosat.MR
         IEnumerator Start()
         {
             yield return null; // XR finishes starting before the first frame
-            if (XRSettings.isDeviceActive) yield break;
+            if (XRSettings.isDeviceActive)
+            {
+                if (arComponents != null)
+                    foreach (var b in arComponents) if (b) b.enabled = true;
+                yield break;
+            }
             EnableDesktopMode();
         }
 

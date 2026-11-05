@@ -32,6 +32,7 @@ namespace Eosat.EditorTools
         const float GlobeRadius = 0.12f;          // 24 cm globe
         const float ClientEarthRadiusKm = 6371f;  // client simulator's Earth radius
         const float SatelliteScale = 0.15f;       // hovering model: 37 cm spacecraft drawn ~5.5 cm
+        const float StandHeight = 0.2f;           // globe centre above the desk: 12 cm radius + 8 cm stand
         static readonly Vector3 BoxMeters = new Vector3(0.10f, 0.37f, 0.23f);
 
         // Ground stations the client simulator reports contact with (approximate public locations).
@@ -228,6 +229,18 @@ namespace Eosat.EditorTools
             mirror.spacecraft = ctrl;
             mirror.model = model.gameObject;
 
+            // ---------- Desk stand: the globe stands on the real desk like a scale model ----------
+            var lit = Shader.Find("Universal Render Pipeline/Lit");
+            var mBase = Mat("MR_StandBase", lit, new Color(0.11f, 0.11f, 0.12f));
+            mBase.SetFloat("_Metallic", 0.5f); mBase.SetFloat("_Smoothness", 0.55f);
+            var mRod = Mat("MR_StandRod", lit, new Color(0.78f, 0.78f, 0.8f));
+            mRod.SetFloat("_Metallic", 1f); mRod.SetFloat("_Smoothness", 0.7f);
+            var stand = Child("Desk Stand", globe);
+            Prim(PrimitiveType.Cylinder, "Base", stand, new Vector3(0f, -StandHeight + 0.006f, 0f), new Vector3(0.13f, 0.006f, 0.13f), mBase);
+            Prim(PrimitiveType.Cylinder, "Rod", stand, new Vector3(0f, -0.153f, 0f), new Vector3(0.01f, 0.035f, 0.01f), mRod);
+            var shadow = Prim(PrimitiveType.Quad, "Contact Shadow", stand, new Vector3(0f, -StandHeight + 0.0015f, 0f), new Vector3(0.34f, 0.34f, 1f), ContactShadowMaterial());
+            shadow.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+
             // ---------- Telemetry overlay ----------
             var tel = Child("Telemetry Overlay", globe);
             var overlay = tel.gameObject.AddComponent<TelemetryOverlay>();
@@ -254,7 +267,8 @@ namespace Eosat.EditorTools
             overlay.stationsRoot = stations;
             overlay.readoutRoot = readout;
             overlay.readoutText = tm;
-            overlay.startVisible = true;
+            overlay.startVisible = false;                       // default = just the model on the desk (reference look)
+            overlay.extraDataObjects = new[] { sunMarker.gameObject };
 
             // ---------- Desk placement ----------
             var placer = new GameObject("Tabletop Placer").AddComponent<TabletopAnchorPlacer>();
@@ -262,6 +276,9 @@ namespace Eosat.EditorTools
             placer.planeManager = planes;
             placer.anchorManager = anchors;
             placer.content = globe;
+            placer.forwardDistance = 0.55f;
+            placer.lateralOffset = 0.12f;
+            placer.hoverHeight = StandHeight;
 
             // ---------- Hand tablet ----------
             var tabletRoot = new GameObject("Hand Tablet");
@@ -315,11 +332,48 @@ namespace Eosat.EditorTools
             fallback.arComponents = new Behaviour[] { arSession, arCamera, planes, anchors };
             foreach (var b in fallback.arComponents) b.enabled = false; // switched on at runtime only with a headset
 
+            fallback.deskOffset = StandHeight;   // no virtual room: in the headset the real room is passthrough
+
             EditorSceneManager.SaveScene(scene, ScenePath);
             AddToBuildSettings(ScenePath);
             AssetDatabase.SaveAssets();
             Selection.activeGameObject = globe.gameObject;
             return "Built " + ScenePath + " (" + replayNote + ")";
+        }
+
+        // ---------- Tabletop look helpers ----------
+
+        /// <summary>Soft round shadow under the stand so the globe looks grounded on the desk (also darkens passthrough).</summary>
+        static Material ContactShadowMaterial()
+        {
+            const string texPath = Root + "/Textures/MR_ContactShadow.asset";
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(texPath);
+            if (tex == null)
+            {
+                const int n = 64;
+                tex = new Texture2D(n, n, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, name = "MR_ContactShadow" };
+                for (int y = 0; y < n; y++)
+                    for (int x = 0; x < n; x++)
+                    {
+                        float dx = (x + 0.5f) / n * 2f - 1f, dy = (y + 0.5f) / n * 2f - 1f;
+                        float r = Mathf.Sqrt(dx * dx + dy * dy);
+                        float a = Mathf.Pow(Mathf.Clamp01(1f - r), 1.6f) * 0.75f;
+                        tex.SetPixel(x, y, new Color(0f, 0f, 0f, a));
+                    }
+                tex.Apply();
+                AssetDatabase.CreateAsset(tex, texPath);
+            }
+            var m = Mat("MR_ContactShadow", Shader.Find("Universal Render Pipeline/Unlit"), Color.black);
+            m.SetTexture("_BaseMap", tex);
+            m.SetFloat("_Surface", 1f); m.SetFloat("_Blend", 0f);
+            m.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha); m.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+            m.SetFloat("_SrcBlendAlpha", (float)BlendMode.One); m.SetFloat("_DstBlendAlpha", (float)BlendMode.OneMinusSrcAlpha);
+            m.SetFloat("_ZWrite", 0f);
+            m.SetOverrideTag("RenderType", "Transparent");
+            m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            m.renderQueue = (int)RenderQueue.Transparent - 10;
+            EditorUtility.SetDirty(m);
+            return m;
         }
 
         // ---------- UI helpers ----------

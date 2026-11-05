@@ -42,7 +42,13 @@ namespace Eosat.MR
         }
 
         // Keeps the UI honest when the simulator changes states, and animates the % labels.
-        void Update() => SyncFromScene();
+        float nextSync;
+        void Update()
+        {
+            if (Time.unscaledTime < nextSync) return;   // perf: labels at 10 Hz instead of every frame
+            nextSync = Time.unscaledTime + 0.1f;
+            SyncFromScene();
+        }
 
         public void OnDataToggled(bool on)
         {
@@ -86,6 +92,7 @@ namespace Eosat.MR
         void Click()
         {
             if (clickSound) clickSound.Play();
+            nextSync = 0f; // show the new state on the next frame
         }
     }
 }

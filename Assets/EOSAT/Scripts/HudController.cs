@@ -36,6 +36,8 @@ namespace Eosat
         bool? vrMode;
         bool snapPanel;
         InputAction guideButton;
+        float nextTextRefresh;
+        const float TextRefreshSeconds = 0.2f;
 
         const string DesktopHint = "H  guide     1  spacecraft view     2  Earth view     drag  orbit     scroll  zoom";
         const string VrHint = "B / Y  guide     A / X  switch view     thumbstick  turn & zoom";
@@ -67,6 +69,9 @@ namespace Eosat
             float targetDim = spacecraft.Stalled ? stalledDim : 0f;
             dimAlpha = Mathf.MoveTowards(dimAlpha, targetDim, Time.deltaTime * 0.3f);
             dim.color = new Color(0.05f, 0.05f, 0.07f, dimAlpha);
+
+            if (Time.unscaledTime < nextTextRefresh) return;   // perf: text/mesh rebuild at 5 Hz, not every frame
+            nextTextRefresh = Time.unscaledTime + TextRefreshSeconds;
 
             status.text = spacecraft.HasData ? Line1() + "\n" + Line2() : $"Waiting for telemetry ({hub.SourceLabel}) {TcpNote()}";
 

@@ -25,6 +25,14 @@ namespace Eosat.MR
         [Tooltip("AR Session / camera / plane / anchor managers. Saved disabled in the scene and switched on only when a headset is running, so desktop Play has no 'No active XR...Subsystem' warnings.")]
         public Behaviour[] arComponents;
 
+        [Header("Desktop preview (no headset)")]
+        [Tooltip("Stand-in desk/room shown only on desktop, where there is no passthrough of the real room.")]
+        public GameObject previewRoom;
+        [Tooltip("Height of the globe centre above the desk surface (same as TabletopAnchorPlacer.hoverHeight).")]
+        public float deskOffset = 0.2f;
+        public Color previewBackground = new Color(0.36f, 0.34f, 0.32f, 1f);
+        bool framed;
+
         [Header("Desktop controls")]
         public float moveSpeed = 0.6f;
         public float lookSpeed = 0.15f;
@@ -63,6 +71,8 @@ namespace Eosat.MR
             tabletCanvas.worldCamera = cam;
             if (!tabletCanvas.GetComponent<GraphicRaycaster>()) tabletCanvas.gameObject.AddComponent<GraphicRaycaster>();
             if (desktopHint) desktopHint.SetActive(true);
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = previewBackground;   // no passthrough on desktop: neutral room colour instead of black
 
             Vector3 e = cam.transform.eulerAngles;
             yaw = e.y;
@@ -73,6 +83,7 @@ namespace Eosat.MR
         void Update()
         {
             if (!Active) return;
+            if (!framed && placer && placer.IsPlaced) FrameDesk();
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             float dt = Time.deltaTime;
@@ -113,7 +124,33 @@ namespace Eosat.MR
                 if (kb.digit2Key.wasPressedThisFrame) Flip(tablet.antennaToggle);
                 if (kb.digit3Key.wasPressedThisFrame) Flip(tablet.panelsToggle);
             }
-            if (kb.rKey.wasPressedThisFrame && placer) placer.Replace();
+            if (kb.rKey.wasPressedThisFrame && placer) { placer.Replace(); framed = false; }
+        }
+
+        /// <summary>Puts the stand-in desk under the globe and seats the camera at it, like the reference shot.</summary>
+        void FrameDesk()
+        {
+            framed = true;
+            Transform globe = placer.content;
+            Vector3 toGlobe = globe.position - cam.transform.position;
+            toGlobe.y = 0f;
+            Vector3 fwd = toGlobe.sqrMagnitude > 1e-4f ? toGlobe.normalized : Vector3.forward;
+            float deskY = globe.position.y - deskOffset;
+
+            if (previewRoom)
+            {
+                previewRoom.SetActive(true);
+                previewRoom.transform.SetPositionAndRotation(new Vector3(globe.position.x, deskY, globe.position.z) - fwd * 0.05f,
+                                                             Quaternion.LookRotation(fwd, Vector3.up));
+            }
+
+            // Seated viewer ~0.7 m back, eyes ~0.42 m above the desk, looking at the globe.
+            cam.transform.position = globe.position - fwd * 0.7f + Vector3.up * 0.22f;
+            cam.transform.LookAt(globe.position + Vector3.up * 0.04f);
+            Vector3 e = cam.transform.eulerAngles;
+            yaw = e.y;
+            pitch = e.x > 180f ? e.x - 360f : e.x;
+            Debug.Log($"[EOSAT MR] Desktop preview: desk top at y={deskY:0.00} m, globe centre {deskOffset * 100f:0} cm above it, camera {Vector3.Distance(cam.transform.position, globe.position):0.00} m away.");
         }
 
         static void Flip(Toggle toggle)

@@ -39,6 +39,9 @@ namespace Eosat.MR
         public Vector3 readoutOffset = new Vector3(0.09f, 0.02f, 0f);
         public float readoutRefreshSeconds = 0.25f;
 
+        [Tooltip("Other objects shown only with the Data overlay (e.g. the Sun marker), so the default view is just the model on the desk.")]
+        public GameObject[] extraDataObjects;
+
         public bool startVisible = true;
         public bool Visible { get; private set; }
 
@@ -46,6 +49,7 @@ namespace Eosat.MR
         Vector3[] pathPoints;
         float nextRefresh;
         string cachedStationName = "";
+        bool pathBuilt;
         Transform cachedStation;
 
         void Awake() => SetVisible(startVisible);
@@ -53,7 +57,7 @@ namespace Eosat.MR
         void Start()
         {
             if (Camera.main) cam = Camera.main.transform;
-            foreach (var lr in new[] { orbitPath, signalLink, sunArrow, earthArrow, leaderLine })
+            foreach (var lr in new[] { signalLink, sunArrow, earthArrow, leaderLine })
                 if (lr) lr.useWorldSpace = true;
         }
 
@@ -64,6 +68,7 @@ namespace Eosat.MR
                 if (lr) lr.enabled = visible;
             if (stationsRoot) stationsRoot.gameObject.SetActive(visible);
             if (readoutRoot) readoutRoot.gameObject.SetActive(visible);
+            if (extraDataObjects != null) foreach (var g in extraDataObjects) if (g) g.SetActive(visible);
             nextRefresh = 0f;
         }
 
@@ -95,14 +100,17 @@ namespace Eosat.MR
         {
             if (!orbitPath) return;
             if (replay == null || !replay.Loaded || !spacecraft) { orbitPath.enabled = false; return; }
+            orbitPath.enabled = true;
+            if (pathBuilt) return;   // perf: the orbit doesn't change, and the line moves with the globe (local space)
+            orbitPath.useWorldSpace = false;
             var p = replay.PathEciKm;
             const int step = 2; // 1134 frames -> 567 points is plenty
             int n = (p.Count + step - 1) / step;
             if (pathPoints == null || pathPoints.Length != n) { pathPoints = new Vector3[n]; orbitPath.positionCount = n; }
             for (int i = 0; i < n; i++)
-                pathPoints[i] = eciFrame.TransformPoint(EciMath.EciToUnity(p[i * step]) * spacecraft.unitsPerKm);
+                pathPoints[i] = orbitPath.transform.InverseTransformPoint(eciFrame.TransformPoint(EciMath.EciToUnity(p[i * step]) * spacecraft.unitsPerKm));
             orbitPath.SetPositions(pathPoints);
-            orbitPath.enabled = true;
+            pathBuilt = true;
         }
 
         void UpdateLink(TelemetrySample s)

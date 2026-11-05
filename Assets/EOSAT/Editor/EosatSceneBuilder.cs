@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -158,7 +158,7 @@ namespace Eosat.EditorTools
             cam.farClipPlane = 1000f;
             cam.fieldOfView = 55f;
             camGo.AddComponent<AudioListener>();
-            cam.GetUniversalAdditionalCameraData().renderPostProcessing = true;
+            cam.GetUniversalAdditionalCameraData().renderPostProcessing = false; // perf: all volume effects are neutral
             AddHeadTracking(camGo);
             var orbit = rig.AddComponent<Eosat.OrbitCamera>();
             orbit.spacecraft = sc.transform; orbit.earth = eci;

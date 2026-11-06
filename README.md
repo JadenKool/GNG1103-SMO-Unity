@@ -1,14 +1,16 @@
 # GNG1103-SMO-Unity
 
 EOSAT-1 spacecraft visualization for the GNG1103 SMO client project (Group 13).
-Unity 6 + OpenXR, built on Unity's **VR template** (XR Interaction Toolkit 3.7 rig: tracked head,
-controllers + Quest hand tracking, rays, poke, grab). A VR view of EOSAT-1 orbiting the Earth, and a
-mixed-reality tabletop view (globe and satellite floating in your real room), both driven by the client's simulator data.
+Unity 6 + OpenXR. A VR view of EOSAT-1 orbiting the Earth, and a mixed-reality tabletop view (globe and
+satellite floating in your real room), both driven by the client's simulator data.
+- **Main scene**: Unity's VR template rig (XR Interaction Toolkit 3.7).
+- **MR scene**: Meta's SDKs - **Meta XR Core SDK** (`OVRCameraRig`, `OVRPassthroughLayer`) and the
+  **Meta Interaction SDK** (hands + controllers: poke, ray, grab, distance grab). Both v207, free, from the Unity registry.
 
 | Scene | What it shows |
 |---|---|
 | `Assets/Scenes/EOSAT_Visualization.unity` | Main view: Earth (rotating by real sidereal time), EOSAT-1, real Sun direction, HUD. Zoom out and the satellite becomes a **yellow dot** (Concept 4). |
-| `Assets/Scenes/EOSAT_MR_Tabletop.unity` | Mixed reality: a 24 cm **free-floating globe** above your desk with the true-scale orbit, ground-station links and a hovering EOSAT-1 model. Grab it to move and turn it (6 DoF); let go and it hovers there. **Wrist tablet**: Data / AR-VR / Antenna / Solar Panels switches, live Alt / Vel / Eclipse / modes, and the data-source buttons (Sim / TCP 8100 / WebSocket 8101). |
+| `Assets/Scenes/EOSAT_MR_Tabletop.unity` | Mixed reality (colour passthrough): a 24 cm **free-floating globe** with the true-scale orbit, ground-station links and a hovering EOSAT-1 model, plus a **floating tablet** (Data / AR-VR / Antenna / Solar Panels switches, live Alt / Vel / Eclipse / modes, data-source buttons Sim / TCP 8100 / WebSocket 8101). Both hover wherever you let go of them. |
 
 Both scenes replay the client's recorded orbit (`Assets/StreamingAssets/sample_vr_frames.ndjson`,
 1 full orbit: 500.9 km, 98° inclination, RAAN 120°) automatically, so they work with no setup.
@@ -22,6 +24,10 @@ Both scenes replay the client's recorded orbit (`Assets/StreamingAssets/sample_v
 2. Install **Unity 6000.6.2f1** (Unity Hub → Installs → Install Editor → Archive).
    It must be this exact version. If you skip this, Hub offers to install it when you open the project.
 3. Install **GitHub Desktop**: <https://desktop.github.com>.
+4. Recommended: in Unity Hub → Installs → 6000.6.2f1 → ⚙ → **Add modules** → **Android Build Support**
+   (with *Android SDK & NDK Tools* and *OpenJDK*). The Meta SDK looks for the Android tools every time scripts reload;
+   without them Unity pops up **"Android SDK not found"** (just click OK - it's harmless). It's also what you need
+   to build a standalone Quest app later.
 
 ### 2. Get the project
 1. GitHub Desktop → **File → Clone repository → URL** → `https://github.com/JadenKool/GNG1103-SMO-Unity`.
@@ -43,7 +49,8 @@ No headset? Both scenes switch to keyboard + mouse automatically:
 | | Click the tablet with the mouse; R = re-place the globe |
 
 If a scene looks broken or empty, rebuild it from code with the **EOSAT** menu:
-**EOSAT → Build Visualization Scene** or **EOSAT → Build MR Tabletop Scene**.
+**EOSAT → Build Visualization Scene** or **EOSAT → Build MR Tabletop Scene (Meta SDK)**.
+(The old XRI / AR Foundation MR builder is kept under *EOSAT → Legacy* - don't use it for the current scene.)
 
 ---
 
@@ -56,19 +63,26 @@ Runs from the Unity Editor over **Meta Horizon Link** (Windows PC only). No Andr
 3. Put the headset on, then press **Play** in Unity.
    - VR controls: thumbstick up/down = zoom, left/right = snap turn, A/X = switch spacecraft/Earth.
 
-**Extra for the MR tabletop scene (passthrough):**
+**Extra for the MR tabletop scene (Meta SDK, passthrough):**
 - Your Meta account needs a free developer organization (<https://developers.meta.com>); then
-  Link app → Settings → **Developer** → turn on *Developer runtime features*, *Pass-through over Meta Horizon Link*
-  and *Spatial data over Meta Horizon Link*, and restart Unity.
-- In the headset: Settings → Physical Space → **Space Setup** (mark your desk as a *Table*), and
-  Settings → Movement Tracking → **Hand tracking** on.
-- Turn your **left palm** toward your face to show the tablet; tap the switches with your right index finger.
-- **Pinch or grip the globe** to move and turn it; use both hands to turn it between them. Let go and it hovers in place.
-- **AR / VR** switch on the tablet: passthrough of your room, or a black space background.
-- Passthrough only shows in the headset (the Game view stays black there). It is full colour on Quest 3 / 3S / Pro
-  and black-and-white on Quest 2 (hardware limit).
+  Link app → Settings → **Beta / Developer** → turn on *Developer runtime features* and
+  *Passthrough over Meta Horizon Link*, and restart Unity.
+- In the headset: Settings → Movement Tracking → **Hand tracking** on (controllers work too).
+- Passthrough only shows in the headset. It is **full colour on Quest 3 / 3S / Pro** and black-and-white on Quest 2 (hardware limit).
 
-`XR_ERROR_FORM_FACTOR_UNAVAILABLE` in the Console when you press Play just means no headset was found; the scenes still run on desktop.
+| In the headset | What it does |
+|---|---|
+| **Click either thumbstick** (or the tablet's AR / VR switch) | Toggle passthrough (your room) ↔ virtual space skybox |
+| **Look at the back of your left wrist** like checking a watch (hold ~0.3 s) | Brings the tablet in front of you (it also starts open in front of you) |
+| Red **X** on the tablet | Hide the tablet (bring it back with the watch gesture) |
+| **Point a hand ray at the bar under the tablet and pinch** | Grab it from a distance. While pinching, **pull your arm back** = tablet slides closer, **push forward** = it slides away. Let go = it stops and hovers there |
+| Tap the tablet with your finger, or point + pinch | Press its switches and buttons |
+| **Grab the globe** (hand, controller grip, or from a distance) | Move and turn it in any direction; let go and it hovers. Walk around it to see every side |
+
+Teleport / snap-turn are turned off in this scene on purpose: in mixed reality you walk around the real room.
+
+`[MetaXRFeature] ErrorFormFactorUnavailable` (or `XR_ERROR_FORM_FACTOR_UNAVAILABLE`) in the Console when you press Play
+just means no headset was found; the scenes still run on desktop.
 
 ---
 
@@ -117,7 +131,8 @@ and the older flat format. `Tools/telemetry_test_server.py` is our original stan
 ```
 Assets/
   EOSAT/Scripts/     telemetry pipeline (TelemetryHub, TCP + WebSocket clients), spacecraft + Earth motion, HUD, yellow dot, replay feed, test recorder
-  EOSAT/MR/          mixed-reality tabletop: desk anchor, wrist tablet, connection UI, AR/VR switch, overlay, desktop fallback
+  EOSAT/MR/          mixed-reality tabletop content: tablet UI, connection UI, telemetry readout, overlay, desktop fallback
+  EOSAT/Meta/        Meta SDK scripts: PassthroughToggle (thumbstick), WristSummonUI (watch gesture), PlaceInFrontOnStart
   Samples/           XR Interaction Toolkit + XR Hands samples (the VR rig and hand visuals)
   VRTemplateAssets/  Unity VR template content (sample scene, tutorial)
   EOSAT/Editor/      EOSAT menu: scene builders, VR/MR setup, parser self-test

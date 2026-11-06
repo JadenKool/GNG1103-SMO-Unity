@@ -46,7 +46,9 @@ namespace Eosat.EditorTools
 
         static Font font;
 
-        [MenuItem("EOSAT/Build MR Tabletop Scene", priority = 1)]
+        // Legacy: the MR scene is now built on Meta's SDK (EOSAT > Build MR Tabletop Scene (Meta SDK)),
+        // which calls Build() below for the content and then swaps the rig. This menu builds the old XRI/AR Foundation version.
+        [MenuItem("EOSAT/Legacy (XRI + AR Foundation)/Build MR Tabletop Scene (XRI)", priority = 100)]
         public static void BuildMenu()
         {
             if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;

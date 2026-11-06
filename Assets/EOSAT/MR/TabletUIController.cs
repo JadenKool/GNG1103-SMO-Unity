@@ -26,6 +26,8 @@ namespace Eosat.MR
         public TelemetryOverlay telemetry;
         public SatelliteDeployControl satellite;
         public EnvironmentManager environment;
+        [Tooltip("Meta SDK scene: the AR/VR toggle drives this instead of EnvironmentManager.")]
+        public Eosat.Meta.PassthroughToggle metaPassthrough;
 
         [Header("Feedback")]
         public AudioSource clickSound;
@@ -35,6 +37,7 @@ namespace Eosat.MR
             if (dataToggle) dataToggle.onValueChanged.AddListener(OnDataToggled);
             if (antennaToggle) antennaToggle.onValueChanged.AddListener(OnAntennaToggled);
             if (panelsToggle) panelsToggle.onValueChanged.AddListener(OnPanelsToggled);
+            if (arVrToggle && metaPassthrough) arVrToggle.onValueChanged.AddListener(OnArVrToggled);
             SyncFromScene();
         }
 
@@ -43,6 +46,13 @@ namespace Eosat.MR
             if (dataToggle) dataToggle.onValueChanged.RemoveListener(OnDataToggled);
             if (antennaToggle) antennaToggle.onValueChanged.RemoveListener(OnAntennaToggled);
             if (panelsToggle) panelsToggle.onValueChanged.RemoveListener(OnPanelsToggled);
+            if (arVrToggle && metaPassthrough) arVrToggle.onValueChanged.RemoveListener(OnArVrToggled);
+        }
+
+        public void OnArVrToggled(bool passthrough)
+        {
+            if (metaPassthrough) metaPassthrough.SetPassthrough(passthrough);
+            Click();
         }
 
         // Keeps the UI honest when the simulator changes states, and animates the % labels.
@@ -79,7 +89,14 @@ namespace Eosat.MR
                 if (dataToggle) dataToggle.SetIsOnWithoutNotify(telemetry.Visible);
                 SetLabel(dataStatus, telemetry.Visible ? "ON" : "OFF");
             }
-            if (environment)
+            if (metaPassthrough)
+            {
+                if (arVrToggle) arVrToggle.SetIsOnWithoutNotify(metaPassthrough.IsPassthrough);
+                SetLabel(arVrStatus, metaPassthrough.IsPassthrough
+                    ? (metaPassthrough.PassthroughAvailable ? "AR  |  PASSTHROUGH  (stick click)" : "AR  |  no headset (preview colour)")
+                    : "VR  |  VIRTUAL SKYBOX  (stick click)");
+            }
+            else if (environment)
             {
                 if (arVrToggle) arVrToggle.SetIsOnWithoutNotify(environment.IsPassthrough);
                 SetLabel(arVrStatus, environment.IsPassthrough

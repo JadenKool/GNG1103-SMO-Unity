@@ -23,6 +23,10 @@ namespace Eosat.MR
         public TabletUIController tablet;
         public ConnectionUIManager connection;
         public TabletopAnchorPlacer placer;
+        [Tooltip("Object to seat the desktop camera at when there is no TabletopAnchorPlacer (Meta SDK scene: the globe).")]
+        public Transform focus;
+        [Tooltip("Hidden in desktop mode after the tablet canvas is pinned to the camera (e.g. the floating tablet's frame and handle).")]
+        public GameObject hideOnDesktop;
         [Tooltip("AR Session / camera / plane / anchor managers. Saved disabled in the scene and switched on only when a headset is running, so desktop Play has no 'No active XR...Subsystem' warnings.")]
         public Behaviour[] arComponents;
 
@@ -69,8 +73,10 @@ namespace Eosat.MR
             root.localRotation = Quaternion.identity;
 
             tabletCanvas.gameObject.SetActive(true);
+            if (hideOnDesktop) hideOnDesktop.SetActive(false);
             tabletCanvas.worldCamera = cam;
             if (!tabletCanvas.GetComponent<GraphicRaycaster>()) tabletCanvas.gameObject.AddComponent<GraphicRaycaster>();
+            EnableMouseUi();
             if (desktopHint) desktopHint.SetActive(true);
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = previewBackground;   // no passthrough on desktop: neutral room colour instead of black
@@ -84,7 +90,7 @@ namespace Eosat.MR
         void Update()
         {
             if (!Active) return;
-            if (!framed && placer && placer.IsPlaced) FrameDesk();
+            if (!framed && ((placer && placer.IsPlaced) || (!placer && focus))) FrameDesk();
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             float dt = Time.deltaTime;
@@ -139,7 +145,7 @@ namespace Eosat.MR
         void FrameDesk()
         {
             framed = true;
-            Transform globe = placer.content;
+            Transform globe = placer ? placer.content : focus;
             Vector3 toGlobe = globe.position - cam.transform.position;
             toGlobe.y = 0f;
             Vector3 fwd = toGlobe.sqrMagnitude > 1e-4f ? toGlobe.normalized : Vector3.forward;
@@ -159,6 +165,26 @@ namespace Eosat.MR
             yaw = e.y;
             pitch = e.x > 180f ? e.x - 360f : e.x;
             Debug.Log($"[EOSAT MR] Desktop preview: desk top at y={deskY:0.00} m, globe centre {deskOffset * 100f:0} cm above it, camera {Vector3.Distance(cam.transform.position, globe.position):0.00} m away.");
+        }
+
+        /// <summary>
+        /// Headset UI modules (Meta PointableCanvasModule / XRI XRUIInputModule) don't read the mouse.
+        /// On desktop, switch them off and use the standard Input System module so the tablet is clickable.
+        /// </summary>
+        static void EnableMouseUi()
+        {
+            var es = UnityEngine.EventSystems.EventSystem.current
+                     ?? FindAnyObjectByType<UnityEngine.EventSystems.EventSystem>();
+            if (!es) return;
+            bool hasMouseModule = false;
+            foreach (var m in es.GetComponents<UnityEngine.EventSystems.BaseInputModule>())
+            {
+                if (m is UnityEngine.InputSystem.UI.InputSystemUIInputModule) { m.enabled = true; hasMouseModule = true; continue; }
+                if (m.GetType().Name == "XRUIInputModule") continue;     // already handles the mouse in the XRI scenes
+                m.enabled = false;
+            }
+            if (!hasMouseModule && !es.GetComponent("XRUIInputModule"))
+                es.gameObject.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
         }
 
         static void Flip(Toggle toggle)

@@ -28,7 +28,9 @@ namespace Eosat.EditorTools
             "OculusTouchControllerProfile",
         };
 
-        [MenuItem("EOSAT/Configure MR (Passthrough over Link)", priority = 41)]
+        // Legacy: enables Unity's AR Foundation passthrough features. The Meta SDK scene uses OVRPassthroughLayer instead,
+        // and running both can conflict, so this is only for the old XRI MR scene.
+        [MenuItem("EOSAT/Legacy (XRI + AR Foundation)/Configure MR (AR Foundation passthrough)", priority = 101)]
         public static void ConfigureMenu() => UnityEngine.Debug.Log("[EOSAT] " + Configure());
 
         public static string Configure()

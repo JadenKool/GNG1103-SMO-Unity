@@ -146,21 +146,12 @@ namespace Eosat.EditorTools
             earthCtrl.spacecraft = ctrl; earthCtrl.earthBody = earthBody.transform; earthCtrl.sunLight = sun; earthCtrl.sunVisual = sunVisual.transform;
             sunVec.earth = earthCtrl;
 
-            // Camera rig: OrbitCamera moves the rig; the camera is a head-tracked child (identity on desktop).
-            var rig = new GameObject("Camera Rig");
-            rig.transform.position = new Vector3(0, 8, -25);
-            var camGo = new GameObject("Main Camera") { tag = "MainCamera" };
-            camGo.transform.SetParent(rig.transform, false);
-            var cam = camGo.AddComponent<Camera>();
-            cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = Color.black;
-            cam.nearClipPlane = 0.01f;
-            cam.farClipPlane = 1000f;
-            cam.fieldOfView = 55f;
-            camGo.AddComponent<AudioListener>();
-            cam.GetUniversalAdditionalCameraData().renderPostProcessing = false; // perf: all volume effects are neutral
-            AddHeadTracking(camGo);
-            var orbit = rig.AddComponent<Eosat.OrbitCamera>();
+            // Camera rig: Unity's XR Origin (hands + controllers); OrbitCamera moves the rig root, the head is tracked inside it.
+            var rigOrigin = EosatXrRig.Create("XR Origin (orbit view)", EosatXrRig.Mode.OrbitView);
+            rigOrigin.transform.position = new Vector3(0, 8, -25);
+            EosatXrRig.ConfigureCamera(rigOrigin, Color.black, 0.01f, 1000f, 55f, false);
+            EosatXrRig.EnsureInteractionManager();
+            var orbit = rigOrigin.gameObject.AddComponent<Eosat.OrbitCamera>();
             orbit.spacecraft = sc.transform; orbit.earth = eci;
 
             var hudGo = new GameObject("HUD");

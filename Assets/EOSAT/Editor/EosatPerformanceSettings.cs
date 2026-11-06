@@ -40,7 +40,7 @@ namespace Eosat.EditorTools
                 var soft = so.FindProperty("m_SoftShadowsSupported");
                 if (soft != null) { soft.boolValue = false; so.ApplyModifiedPropertiesWithoutUndo(); }
                 urp.shadowDistance = 20f;
-                urp.upscalingFilter = UpscalingFilterSelection.FSR; // sharp upscale when FrameRateGuard lowers render scale
+                urp.upscalingFilter = UpscalingFilterSelection.Auto; // OpenXR validation: custom upscalers are slow in XR
                 urp.renderScale = 1f;
                 EditorUtility.SetDirty(urp);
 

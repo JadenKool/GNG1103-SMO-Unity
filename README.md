@@ -1,13 +1,14 @@
 # GNG1103-SMO-Unity
 
 EOSAT-1 spacecraft visualization for the GNG1103 SMO client project (Group 13).
-Unity 6 + OpenXR: a VR view of EOSAT-1 orbiting the Earth, and a mixed-reality tabletop view
-(globe and satellite on your real desk), both driven by the client's simulator data.
+Unity 6 + OpenXR, built on Unity's **VR template** (XR Interaction Toolkit 3.7 rig: tracked head,
+controllers + Quest hand tracking, rays, poke, grab). A VR view of EOSAT-1 orbiting the Earth, and a
+mixed-reality tabletop view (globe and satellite floating in your real room), both driven by the client's simulator data.
 
 | Scene | What it shows |
 |---|---|
 | `Assets/Scenes/EOSAT_Visualization.unity` | Main view: Earth (rotating by real sidereal time), EOSAT-1, real Sun direction, HUD. Zoom out and the satellite becomes a **yellow dot** (Concept 4). |
-| `Assets/Scenes/EOSAT_MR_Tabletop.unity` | Mixed reality: 24 cm globe on your desk with the true-scale orbit, ground-station links, a hovering EOSAT-1 model, and a **wrist tablet** with Data / Antenna / Solar Panels switches (built on Josh's tabletop concept). |
+| `Assets/Scenes/EOSAT_MR_Tabletop.unity` | Mixed reality: a 24 cm **free-floating globe** above your desk with the true-scale orbit, ground-station links and a hovering EOSAT-1 model. Grab it to move and turn it (6 DoF); let go and it hovers there. **Wrist tablet**: Data / AR-VR / Antenna / Solar Panels switches, live Alt / Vel / Eclipse / modes, and the data-source buttons (Sim / TCP 8100 / WebSocket 8101). |
 
 Both scenes replay the client's recorded orbit (`Assets/StreamingAssets/sample_vr_frames.ndjson`,
 1 full orbit: 500.9 km, 98° inclination, RAAN 120°) automatically, so they work with no setup.
@@ -37,8 +38,9 @@ No headset? Both scenes switch to keyboard + mouse automatically:
 |---|---|
 | Drag = orbit camera | Right-drag = look around |
 | Scroll = zoom (zoom far out to see the yellow dot) | WASD = move, Q/E = down/up, Shift = faster |
-| 1 = spacecraft view, 2 = Earth view | 1 = Data overlay, 2 = Antenna, 3 = Solar panels |
-| H = help | Click the tablet switches with the mouse; R = re-place the globe |
+| 1 = spacecraft view, 2 = Earth view | 1 = Data overlay, 2 = AR/VR, 3 = Antenna, 4 = Solar panels |
+| H = help | 5 = Sim, 6 = TCP 8100, 7 = WebSocket 8101 |
+| | Click the tablet with the mouse; R = re-place the globe |
 
 If a scene looks broken or empty, rebuild it from code with the **EOSAT** menu:
 **EOSAT → Build Visualization Scene** or **EOSAT → Build MR Tabletop Scene**.
@@ -61,7 +63,10 @@ Runs from the Unity Editor over **Meta Horizon Link** (Windows PC only). No Andr
 - In the headset: Settings → Physical Space → **Space Setup** (mark your desk as a *Table*), and
   Settings → Movement Tracking → **Hand tracking** on.
 - Turn your **left palm** toward your face to show the tablet; tap the switches with your right index finger.
-- Passthrough only shows in the headset (the Game view stays black there). Quest 2 passthrough is black-and-white.
+- **Pinch or grip the globe** to move and turn it; use both hands to turn it between them. Let go and it hovers in place.
+- **AR / VR** switch on the tablet: passthrough of your room, or a black space background.
+- Passthrough only shows in the headset (the Game view stays black there). It is full colour on Quest 3 / 3S / Pro
+  and black-and-white on Quest 2 (hardware limit).
 
 `XR_ERROR_FORM_FACTOR_UNAVAILABLE` in the Console when you press Play just means no headset was found; the scenes still run on desktop.
 
@@ -71,12 +76,24 @@ Runs from the Unity Editor over **Meta Horizon Link** (Windows PC only). No Andr
 
 The client package (`GNG1103_F2026`, not in this repo) contains `vr_stub.py` and `sample_vr_frames.ndjson`.
 
-1. Select the **Telemetry** object in the scene → `TelemetryHub` → **Source = Tcp**, host `127.0.0.1`, port `8100`.
-2. Press **Play** in Unity first, then start the stub in a terminal in the client folder:
+Three sources, switchable while playing (`TelemetryHub.SwitchDataSource`):
+
+| Source | Where | Switch with |
+|---|---|---|
+| Simulated (local) | built-in replay of the client's orbit | tablet **SIM** button / key 5 |
+| TCP | `127.0.0.1:8100` | tablet **TCP 8100** / key 6 |
+| WebSocket | `ws://127.0.0.1:8101/vr` | tablet **WS 8101** / key 7 |
+
+The tablet's Connection box shows the active feed (e.g. `WebSocket: 8101`) and a green **CONNECTED** while data arrives.
+To start on a network source, set **Telemetry → TelemetryHub → Source** before pressing Play.
+
+1. Start the stub in a terminal in the client folder (it serves TCP 8100 and WebSocket 8101 at the same time):
    ```
+   python vr_stub.py --speed 30
    python vr_stub.py --replay sample_vr_frames.ndjson --speed 5
    python vr_stub.py --chaos --speed 10 --rate 2      # robustness test
    ```
+2. Press **Play** in Unity and pick TCP or WS on the tablet.
 3. To score the test plan: add the **EosatTestRecorder** component to the Telemetry object, run the feed,
    then right-click the component → **Print Report**.
 
@@ -99,8 +116,10 @@ and the older flat format. `Tools/telemetry_test_server.py` is our original stan
 
 ```
 Assets/
-  EOSAT/Scripts/     telemetry pipeline, spacecraft + Earth motion, HUD, yellow dot, replay feed, test recorder
-  EOSAT/MR/          mixed-reality tabletop: desk anchor, wrist tablet, overlay, desktop fallback
+  EOSAT/Scripts/     telemetry pipeline (TelemetryHub, TCP + WebSocket clients), spacecraft + Earth motion, HUD, yellow dot, replay feed, test recorder
+  EOSAT/MR/          mixed-reality tabletop: desk anchor, wrist tablet, connection UI, AR/VR switch, overlay, desktop fallback
+  Samples/           XR Interaction Toolkit + XR Hands samples (the VR rig and hand visuals)
+  VRTemplateAssets/  Unity VR template content (sample scene, tutorial)
   EOSAT/Editor/      EOSAT menu: scene builders, VR/MR setup, parser self-test
   EOSAT/Materials, Meshes, Shaders, Textures
   Scenes/            EOSAT_Visualization, EOSAT_MR_Tabletop

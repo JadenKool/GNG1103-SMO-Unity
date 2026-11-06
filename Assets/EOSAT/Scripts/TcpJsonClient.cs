@@ -13,7 +13,7 @@ namespace Eosat
     /// Objects must sit on one line (NDJSON, as the client's smo-vr/1 simulator sends); a newline
     /// inside an unfinished object marks it as truncated.
     /// </summary>
-    public class TcpJsonClient
+    public class TcpJsonClient : ITelemetryClient
     {
         readonly string host;
         readonly int port;
@@ -36,12 +36,18 @@ namespace Eosat
             thread.Start();
         }
 
+        public string Label => $"TCP: {host}:{port}";
+
         public void Stop()
         {
             running = false;
-            try { client?.Close(); } catch { }
+            connected = false;
+            try { client?.Close(); } catch { }   // unblocks the reader; the background thread then exits
             thread = null;
+            while (messages.TryDequeue(out _)) { }
         }
+
+        public void Disconnect() => Stop();
 
         public bool TryDequeue(out string json) => messages.TryDequeue(out json);
 

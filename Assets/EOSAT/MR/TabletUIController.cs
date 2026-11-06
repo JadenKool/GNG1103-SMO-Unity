@@ -13,15 +13,19 @@ namespace Eosat.MR
         public Toggle dataToggle;
         public Toggle antennaToggle;
         public Toggle panelsToggle;
+        [Tooltip("isOn = passthrough (AR), off = virtual skybox (VR). EnvironmentManager listens to it.")]
+        public Toggle arVrToggle;
 
         [Header("Status labels")]
         public Text dataStatus;
         public Text antennaStatus;
         public Text panelsStatus;
+        public Text arVrStatus;
 
         [Header("Targets")]
         public TelemetryOverlay telemetry;
         public SatelliteDeployControl satellite;
+        public EnvironmentManager environment;
 
         [Header("Feedback")]
         public AudioSource clickSound;
@@ -74,6 +78,13 @@ namespace Eosat.MR
             {
                 if (dataToggle) dataToggle.SetIsOnWithoutNotify(telemetry.Visible);
                 SetLabel(dataStatus, telemetry.Visible ? "ON" : "OFF");
+            }
+            if (environment)
+            {
+                if (arVrToggle) arVrToggle.SetIsOnWithoutNotify(environment.IsPassthrough);
+                SetLabel(arVrStatus, environment.IsPassthrough
+                    ? (environment.PassthroughAvailable ? "AR  |  PASSTHROUGH" : "AR  |  no headset (preview colour)")
+                    : "VR  |  VIRTUAL SKYBOX");
             }
             if (satellite)
             {

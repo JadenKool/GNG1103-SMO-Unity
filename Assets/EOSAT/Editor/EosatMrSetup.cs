@@ -50,6 +50,9 @@ namespace Eosat.EditorTools
             foreach (var f in ox.GetFeatures())
             {
                 if (!Wanted.Contains(f.GetType().Name)) continue;
+                // Other vendors (e.g. Android XR) reuse names like "ARCameraFeature": only Meta's AR features here.
+                string ns = f.GetType().Namespace ?? "";
+                if (f.GetType().Name.StartsWith("AR") && !ns.Contains(".Meta")) continue;
                 f.enabled = true;
                 log.Append(f.GetType().Name).Append(" on; ");
             }

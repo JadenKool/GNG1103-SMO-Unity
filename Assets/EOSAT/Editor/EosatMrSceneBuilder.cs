@@ -32,7 +32,7 @@ namespace Eosat.EditorTools
         const float GlobeRadius = 0.12f;          // 24 cm globe
         const float ClientEarthRadiusKm = 6371f;  // client simulator's Earth radius
         const float SatelliteScale = 0.15f;       // hovering model: 37 cm spacecraft drawn ~5.5 cm
-        const float StandHeight = 0.2f;           // globe centre above the desk: 12 cm radius + 8 cm stand
+        const float StandHeight = 0.25f;          // globe centre above the desk: free-floating, 13 cm gap under the 12 cm globe
         static readonly Vector3 BoxMeters = new Vector3(0.10f, 0.37f, 0.23f);
 
         // Ground stations the client simulator reports contact with (approximate public locations).
@@ -85,40 +85,26 @@ namespace Eosat.EditorTools
             // ---------- XR rig with passthrough ----------
             var arSession = new GameObject("AR Session").AddComponent<ARSession>();
 
-            var originGo = new GameObject("XR Origin (MR Rig)");
-            var origin = originGo.AddComponent<XROrigin>();
-            var offset = Child("Camera Offset", originGo.transform);
-
-            var camGo = new GameObject("Main Camera") { tag = "MainCamera" };
-            camGo.transform.SetParent(offset, false);
+            // Unity's standard rig: tracked head, controller + Quest hand models, near-far rays, poke, grab.
+            var origin = EosatXrRig.Create("XR Origin (MR, hands + controllers)", EosatXrRig.Mode.MixedReality);
+            var originGo = origin.gameObject;
+            var offset = origin.CameraFloorOffsetObject.transform;
+            var cam = EosatXrRig.ConfigureCamera(origin, new Color(0f, 0f, 0f, 0f), 0.01f, 100f, 60f, false); // alpha 0 = passthrough; HDR target has no alpha
+            var camGo = cam.gameObject;
             camGo.transform.localPosition = new Vector3(0f, 1.6f, 0f); // desktop height; head tracking overrides in VR
-            var cam = camGo.AddComponent<Camera>();
-            cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = new Color(0f, 0f, 0f, 0f);  // alpha 0 = passthrough shows through
-            cam.nearClipPlane = 0.01f;
-            cam.farClipPlane = 100f;
-            cam.allowHDR = false;                              // HDR target has no alpha channel
-            camGo.AddComponent<AudioListener>();
-            cam.GetUniversalAdditionalCameraData().renderPostProcessing = false;
-            EosatSceneBuilder.AddHeadTracking(camGo);
             var arCamera = camGo.AddComponent<ARCameraManager>();
-
-            origin.Camera = cam;
-            origin.CameraFloorOffsetObject = offset.gameObject;
-            origin.RequestedTrackingOriginMode = XROrigin.TrackingOriginMode.Floor;
 
             var planes = originGo.AddComponent<ARPlaneManager>();
             planes.planePrefab = null;
             planes.requestedDetectionMode = PlaneDetectionMode.Horizontal;
             var anchors = originGo.AddComponent<ARAnchorManager>();
 
-            var leftCtrl = Child("Left Controller", offset).gameObject.AddComponent<ControllerPose>();
+            // Left controller pose for the wrist tablet when hands aren't tracked (the rig's own controller objects drive the visuals).
+            var leftCtrl = Child("Tablet Fallback (Left Controller Pose)", offset).gameObject.AddComponent<ControllerPose>();
             leftCtrl.side = ControllerPose.Side.Left;
-            var rightCtrl = Child("Right Controller", offset).gameObject.AddComponent<ControllerPose>();
-            rightCtrl.side = ControllerPose.Side.Right;
 
-            // ---------- Interaction: right index finger pokes UI ----------
-            new GameObject("XR Interaction Manager").AddComponent<XRInteractionManager>();
+            // ---------- Interaction: the rig's right poke / near-far interactors press the tablet ----------
+            EosatXrRig.EnsureInteractionManager();
             var esGo = new GameObject("EventSystem");
             esGo.AddComponent<EventSystem>();
             var uiModule = esGo.AddComponent<XRUIInputModule>();
@@ -126,20 +112,12 @@ namespace Eosat.EditorTools
             uiModule.enableMouseInput = true;
             uiModule.enableBuiltinActionsAsFallback = true;
 
-            var tip = Child("Right Index Tip (Poke)", originGo.transform);
-            var follower = tip.gameObject.AddComponent<HandJointFollower>();
-            follower.xrOrigin = origin;
-            follower.handedness = Handedness.Right;
-            follower.joint = XRHandJointID.IndexTip;
-            follower.controllerFallback = rightCtrl;
-            var poke = tip.gameObject.AddComponent<XRPokeInteractor>();
-            poke.enableUIInteraction = true;
-            follower.visual = Prim(PrimitiveType.Sphere, "Fingertip Dot", tip, Vector3.zero, Vector3.one * 0.008f, mDot);
+
 
             // ---------- Telemetry: client data replay (same path as the live TCP feed) ----------
             var telGo = new GameObject("Telemetry");
             var hub = telGo.AddComponent<TelemetryHub>();
-            hub.source = TelemetrySourceMode.Simulated;      // switch to Tcp for vr_stub.py / the real simulator
+            hub.source = DataSource.SimulatedLocal;      // switch to Tcp for vr_stub.py / the real simulator
             telGo.AddComponent<SimulatedSpacecraft>();        // fallback if the replay file is missing
             var replay = telGo.AddComponent<SampleReplayFeed>();
             replay.speed = 30f;
@@ -147,7 +125,8 @@ namespace Eosat.EditorTools
             // ---------- Tabletop globe: true-scale orbit in an ECI frame ----------
             var globe = new GameObject("Globe Pivot").transform;
             globe.position = new Vector3(0.15f, 1.15f, 0.6f); // edit-time preview; the placer moves it at runtime
-            var eci = Child("ECI Frame", globe);               // inertial axes: X vernal equinox, Unity +Y = north
+            var spin = Child("Spin Pivot (grab the globe to turn)", globe); // InteractiveGlobe turns this, never the root
+            var eci = Child("ECI Frame", spin);                // inertial axes: X vernal equinox, Unity +Y = north
 
             var earth = Child("Earth", eci);
             earth.localScale = Vector3.one * GlobeRadius;
@@ -186,7 +165,7 @@ namespace Eosat.EditorTools
             earthCtrl.spacecraft = ctrl;
             earthCtrl.earthBody = earth;                      // GMST rotation for the displayed sim time
 
-            var sunMarker = Prim(PrimitiveType.Sphere, "Sun", globe, Vector3.zero, Vector3.one * 0.035f, mSun).transform;
+            var sunMarker = Prim(PrimitiveType.Sphere, "Sun", spin, Vector3.zero, Vector3.one * 0.035f, mSun).transform;
             var sunLabel = Child("Label", sunMarker);
             sunLabel.localPosition = new Vector3(0f, 1.1f, 0f);
             sunLabel.localScale = Vector3.one / 0.035f;
@@ -229,20 +208,29 @@ namespace Eosat.EditorTools
             mirror.spacecraft = ctrl;
             mirror.model = model.gameObject;
 
-            // ---------- Desk stand: the globe stands on the real desk like a scale model ----------
-            var lit = Shader.Find("Universal Render Pipeline/Lit");
-            var mBase = Mat("MR_StandBase", lit, new Color(0.11f, 0.11f, 0.12f));
-            mBase.SetFloat("_Metallic", 0.5f); mBase.SetFloat("_Smoothness", 0.55f);
-            var mRod = Mat("MR_StandRod", lit, new Color(0.78f, 0.78f, 0.8f));
-            mRod.SetFloat("_Metallic", 1f); mRod.SetFloat("_Smoothness", 0.7f);
-            var stand = Child("Desk Stand", globe);
-            Prim(PrimitiveType.Cylinder, "Base", stand, new Vector3(0f, -StandHeight + 0.006f, 0f), new Vector3(0.13f, 0.006f, 0.13f), mBase);
-            Prim(PrimitiveType.Cylinder, "Rod", stand, new Vector3(0f, -0.153f, 0f), new Vector3(0.01f, 0.035f, 0.01f), mRod);
-            var shadow = Prim(PrimitiveType.Quad, "Contact Shadow", stand, new Vector3(0f, -StandHeight + 0.0015f, 0f), new Vector3(0.34f, 0.34f, 1f), ContactShadowMaterial());
-            shadow.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            // ---------- Free-floating globe (no stand): grab it = 6 DoF move + turn, zero gravity ----------
+            var grabCol = globe.gameObject.AddComponent<SphereCollider>();
+            grabCol.radius = GlobeRadius * 1.05f;
+            var body = globe.gameObject.AddComponent<Rigidbody>();
+            body.isKinematic = true;             // never falls, never drifts
+            body.useGravity = false;
+            var move = globe.gameObject.AddComponent<UnityEngine.XR.Interaction.Toolkit.Interactables.XRGrabInteractable>();
+            move.colliders.Clear();
+            move.colliders.Add(grabCol);
+            move.movementType = UnityEngine.XR.Interaction.Toolkit.Interactables.XRBaseInteractable.MovementType.Kinematic;
+            move.trackPosition = true;
+            move.trackRotation = true;           // 6 DoF: turn it in your hand to see any side
+            move.throwOnDetach = false;          // stops dead and hovers where it is let go
+            move.useDynamicAttach = true;        // holds where you grabbed it (no snapping to the hand)
+            move.retainTransformParent = true;   // stays under its anchor
+            move.smoothPosition = true;
+            move.smoothRotation = true;
+            move.selectMode = UnityEngine.XR.Interaction.Toolkit.Interactables.InteractableSelectMode.Multiple; // two hands = turn it between them
+            var twoHand = globe.gameObject.AddComponent<UnityEngine.XR.Interaction.Toolkit.Transformers.XRGeneralGrabTransformer>();
+            twoHand.allowTwoHandedScaling = false;
 
             // ---------- Telemetry overlay ----------
-            var tel = Child("Telemetry Overlay", globe);
+            var tel = Child("Telemetry Overlay", spin);
             var overlay = tel.gameObject.AddComponent<TelemetryOverlay>();
             overlay.orbitPath = Line("Orbit Path (client data)", tel, 0.0012f, mLine, new Color(0.3f, 0.85f, 1f, 0.6f));
             overlay.signalLink = Line("Ground Station Link", tel, 0.0015f, mLine, new Color(0.3f, 1f, 0.55f, 0.9f));
@@ -293,8 +281,8 @@ namespace Eosat.EditorTools
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.worldCamera = cam;
             var crt = (RectTransform)canvasGo.transform;
-            crt.sizeDelta = new Vector2(450f, 370f);
-            crt.localScale = Vector3.one * 0.0004f;               // ~18 x 15 cm
+            crt.sizeDelta = new Vector2(820f, 470f);
+            crt.localScale = Vector3.one * 0.00033f;              // ~27 x 15.5 cm
             canvasGo.AddComponent<CanvasScaler>().dynamicPixelsPerUnit = 3f;
             canvasGo.AddComponent<TrackedDeviceGraphicRaycaster>();
             hand.tabletVisual = canvasGo;
@@ -304,22 +292,63 @@ namespace Eosat.EditorTools
             bg.gameObject.AddComponent<Image>().color = new Color(0.05f, 0.07f, 0.11f, 0.88f);
 
             var title = UIText("Title", crt, "EOSAT-1  CONTROL", 28, FontStyle.Bold, new Color(0.85f, 0.93f, 1f), TextAnchor.MiddleCenter);
-            Place(title.rectTransform, new Vector2(0f, 148f), new Vector2(420f, 44f));
+            Place(title.rectTransform, new Vector2(0f, 200f), new Vector2(780f, 44f));
 
-            var (dataT, dataS) = Row(crt, "Data Overlay", 72f);
-            var (antT, antS) = Row(crt, "Deploy Antenna", -10f);
-            var (solT, solS) = Row(crt, "Deploy Solar Panels", -92f);
+            // Left column: toggles
+            const float L = -200f, R = 205f, RowW = 380f;
+            var (dataT, dataS) = Row(crt, "Data Overlay", 128f, L, RowW);
+            var (envT, envS) = Row(crt, "AR / VR View", 48f, L, RowW);
+            var (antT, antS) = Row(crt, "Deploy Antenna", -32f, L, RowW);
+            var (solT, solS) = Row(crt, "Deploy Solar Panels", -112f, L, RowW);
+
+            // AR/VR switch: EnvironmentManager sits on the toggle and listens to it (on = passthrough).
+            var env = envT.gameObject.AddComponent<EnvironmentManager>();
+            env.xrCamera = cam;
+            env.cameraManager = arCamera;
+            env.toggle = envT;
+            env.skyboxMaterial = SpaceSkybox();
+            env.startMode = EnvironmentManager.Mode.Passthrough;
+
+            // Right column: live data + connection box
+            var dataBox = UI("Satellite Data", crt);
+            Place(dataBox, new Vector2(R, 92f), new Vector2(380f, 176f));
+            dataBox.gameObject.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.07f);
+            var dataHead = UIText("Header", dataBox, "SATELLITE DATA", 15, FontStyle.Bold, new Color(0.55f, 0.8f, 1f), TextAnchor.UpperLeft);
+            Place(dataHead.rectTransform, new Vector2(0f, 70f), new Vector2(356f, 22f));
+            var dataText = UIText("Readout", dataBox, "Waiting for telemetry...", 19, FontStyle.Normal, Color.white, TextAnchor.UpperLeft);
+            Place(dataText.rectTransform, new Vector2(0f, -14f), new Vector2(356f, 140f));
+            var readoutUi = canvasGo.AddComponent<TelemetryReadoutUI>();
+            readoutUi.hub = hub;
+            readoutUi.dataText = dataText;
+
+            var connBox = UI("Connection", crt);
+            Place(connBox, new Vector2(R, -102f), new Vector2(380f, 196f));
+            connBox.gameObject.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.07f);
+            var connHead = UIText("Header", connBox, "CONNECTION", 15, FontStyle.Bold, new Color(0.55f, 0.8f, 1f), TextAnchor.UpperLeft);
+            Place(connHead.rectTransform, new Vector2(0f, 80f), new Vector2(356f, 22f));
+            var connStatus = UIText("Status", connBox, "--", 19, FontStyle.Bold, Color.white, TextAnchor.MiddleLeft);
+            Place(connStatus.rectTransform, new Vector2(0f, 46f), new Vector2(356f, 30f));
+            var connDetail = UIText("Detail", connBox, "", 14, FontStyle.Normal, new Color(0.7f, 0.76f, 0.82f), TextAnchor.MiddleLeft);
+            Place(connDetail.rectTransform, new Vector2(0f, 16f), new Vector2(356f, 26f));
+            var conn = canvasGo.AddComponent<ConnectionUIManager>();
+            conn.hub = hub;
+            conn.statusText = connStatus;
+            conn.detailText = connDetail;
+            conn.simulatedButton = Btn(connBox, "SIM", new Vector2(-122f, -50f), new Vector2(112f, 64f));
+            conn.tcpButton = Btn(connBox, "TCP 8100", new Vector2(0f, -50f), new Vector2(112f, 64f));
+            conn.webSocketButton = Btn(connBox, "WS 8101", new Vector2(122f, -50f), new Vector2(112f, 64f));
 
             var ui = canvasGo.AddComponent<TabletUIController>();
             ui.dataToggle = dataT; ui.dataStatus = dataS;
+            ui.arVrToggle = envT; ui.arVrStatus = envS; ui.environment = env;
             ui.antennaToggle = antT; ui.antennaStatus = antS;
             ui.panelsToggle = solT; ui.panelsStatus = solS;
             ui.telemetry = overlay;
             ui.satellite = deployCtrl;
 
             // ---------- Desktop fallback (no headset): keyboard + mouse ----------
-            var hint = UIText("Desktop Hint", crt, "Desktop: right-drag look  |  WASD/QE move  |  scroll zoom\n1 Data  |  2 Antenna  |  3 Panels  |  R re-place globe", 15, FontStyle.Normal, new Color(0.7f, 0.76f, 0.82f), TextAnchor.MiddleCenter);
-            Place(hint.rectTransform, new Vector2(0f, -158f), new Vector2(430f, 44f));
+            var hint = UIText("Desktop Hint", crt, "Desktop: right-drag look | WASD/QE move | 1 Data  2 AR/VR  3 Antenna  4 Panels | 5 Sim  6 TCP  7 WS | R re-place", 13, FontStyle.Normal, new Color(0.7f, 0.76f, 0.82f), TextAnchor.MiddleCenter);
+            Place(hint.rectTransform, new Vector2(0f, -218f), new Vector2(800f, 24f));
             hint.gameObject.SetActive(false);
 
             var fallback = new GameObject("Desktop Fallback").AddComponent<MrDesktopFallback>();
@@ -328,6 +357,7 @@ namespace Eosat.EditorTools
             fallback.tabletCanvas = canvas;
             fallback.desktopHint = hint.gameObject;
             fallback.tablet = ui;
+            fallback.connection = conn;
             fallback.placer = placer;
             fallback.arComponents = new Behaviour[] { arSession, arCamera, planes, anchors };
             foreach (var b in fallback.arComponents) b.enabled = false; // switched on at runtime only with a headset
@@ -378,10 +408,42 @@ namespace Eosat.EditorTools
 
         // ---------- UI helpers ----------
 
-        static (Toggle, Text) Row(RectTransform parent, string label, float y)
+        /// <summary>Black space sky for VR mode; its sun disk follows RenderSettings.sun (the real Sun direction).</summary>
+        static Material SpaceSkybox()
+        {
+            var m = Mat("MR_VR_SpaceSkybox", Shader.Find("Skybox/Procedural"), Color.black);
+            m.SetFloat("_SunDisk", 2f);
+            m.SetFloat("_SunSize", 0.025f);
+            m.SetFloat("_AtmosphereThickness", 0f);
+            m.SetColor("_SkyTint", Color.black);
+            m.SetColor("_GroundColor", new Color(0.015f, 0.015f, 0.02f));
+            m.SetFloat("_Exposure", 1f);
+            EditorUtility.SetDirty(m);
+            return m;
+        }
+
+        static Button Btn(RectTransform parent, string label, Vector2 pos, Vector2 size)
+        {
+            var rt = UI("Button " + label, parent);
+            Place(rt, pos, size);
+            var img = rt.gameObject.AddComponent<Image>();
+            img.color = new Color(0.25f, 0.28f, 0.33f, 1f);
+            var b = rt.gameObject.AddComponent<Button>();
+            b.targetGraphic = img;
+            var c = b.colors;
+            c.highlightedColor = new Color(1.3f, 1.3f, 1.3f);
+            c.pressedColor = new Color(1.8f, 1.8f, 1.8f);
+            c.fadeDuration = 0.08f;
+            b.colors = c;
+            var t = UIText("Label", rt, label, 17, FontStyle.Bold, Color.white, TextAnchor.MiddleCenter);
+            Stretch(t.rectTransform);
+            return b;
+        }
+
+        static (Toggle, Text) Row(RectTransform parent, string label, float y, float x = 0f, float width = 414f)
         {
             var row = UI("Row " + label, parent);
-            Place(row, new Vector2(0f, y), new Vector2(414f, 72f));
+            Place(row, new Vector2(x, y), new Vector2(width, 72f));
             var bg = row.gameObject.AddComponent<Image>();
             bg.color = new Color(1f, 1f, 1f, 0.07f);
 
@@ -395,7 +457,7 @@ namespace Eosat.EditorTools
             toggle.colors = colors;
 
             var track = UI("Switch", row);
-            Place(track, new Vector2(160f, 0f), new Vector2(72f, 36f));
+            Place(track, new Vector2(width * 0.5f - 47f, 0f), new Vector2(72f, 36f));
             track.gameObject.AddComponent<Image>().color = new Color(0.25f, 0.28f, 0.33f, 1f);
             var on = UI("On", track);
             Stretch(on, 4f);
@@ -405,9 +467,10 @@ namespace Eosat.EditorTools
             toggle.isOn = false;
 
             var name = UIText("Label", row, label, 24, FontStyle.Bold, Color.white, TextAnchor.MiddleLeft);
-            Place(name.rectTransform, new Vector2(-50f, 12f), new Vector2(290f, 32f));
+            float labelX = -width * 0.5f + 157f;   // 12 px left margin, 290 px wide
+            Place(name.rectTransform, new Vector2(labelX, 12f), new Vector2(290f, 32f));
             var status = UIText("Status", row, "--", 16, FontStyle.Normal, new Color(0.55f, 0.8f, 1f), TextAnchor.MiddleLeft);
-            Place(status.rectTransform, new Vector2(-50f, -16f), new Vector2(290f, 26f));
+            Place(status.rectTransform, new Vector2(labelX, -16f), new Vector2(290f, 26f));
             return (toggle, status);
         }
 

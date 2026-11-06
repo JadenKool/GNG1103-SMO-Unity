@@ -28,7 +28,7 @@ namespace Eosat
 
         UniversalRenderPipelineAsset urp;
         float originalScale = 1f;
-        float acc; int frames, slowWindows, fastWindows, warmup = 2;
+        float acc, maxDt; int frames, slowWindows, fastWindows, warmup = 2;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Bootstrap()
@@ -60,12 +60,15 @@ namespace Eosat
         {
             if (!urp) return;
             acc += Time.unscaledDeltaTime;
+            maxDt = Mathf.Max(maxDt, Time.unscaledDeltaTime);
             frames++;
             if (acc < window) return;
 
             AverageFps = frames / acc;
-            acc = 0f; frames = 0;
+            bool hitch = maxDt > 0.25f;           // window unfocused, Editor paused, loading: not a GPU problem
+            acc = 0f; frames = 0; maxDt = 0f;
             if (warmup > 0) { warmup--; return; } // ignore scene-load hitches
+            if (hitch) return;
 
             float budget = TargetFps * 0.92f;
             if (AverageFps < budget) { slowWindows++; fastWindows = 0; }

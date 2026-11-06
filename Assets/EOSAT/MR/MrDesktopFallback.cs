@@ -10,7 +10,7 @@ namespace Eosat.MR
     /// <summary>
     /// When no headset is active at Play, switches the MR scene to keyboard + mouse:
     /// right-drag look, WASD/QE move (Shift = fast), scroll = move forward/back,
-    /// 1/2/3 = Data / Antenna / Solar Panels, R = re-place the globe.
+    /// 1/2/3/4 = Data / AR-VR / Antenna / Solar Panels, 5/6/7 = Sim / TCP 8100 / WebSocket 8101, R = re-place the globe.
     /// The wrist tablet is pinned to the lower-left of the view and clickable with the mouse.
     /// </summary>
     [DefaultExecutionOrder(100)]
@@ -21,6 +21,7 @@ namespace Eosat.MR
         public Canvas tabletCanvas;
         public GameObject desktopHint;
         public TabletUIController tablet;
+        public ConnectionUIManager connection;
         public TabletopAnchorPlacer placer;
         [Tooltip("AR Session / camera / plane / anchor managers. Saved disabled in the scene and switched on only when a headset is running, so desktop Play has no 'No active XR...Subsystem' warnings.")]
         public Behaviour[] arComponents;
@@ -121,8 +122,15 @@ namespace Eosat.MR
             if (tablet)
             {
                 if (kb.digit1Key.wasPressedThisFrame) Flip(tablet.dataToggle);
-                if (kb.digit2Key.wasPressedThisFrame) Flip(tablet.antennaToggle);
-                if (kb.digit3Key.wasPressedThisFrame) Flip(tablet.panelsToggle);
+                if (kb.digit2Key.wasPressedThisFrame) Flip(tablet.arVrToggle);
+                if (kb.digit3Key.wasPressedThisFrame) Flip(tablet.antennaToggle);
+                if (kb.digit4Key.wasPressedThisFrame) Flip(tablet.panelsToggle);
+            }
+            if (connection)
+            {
+                if (kb.digit5Key.wasPressedThisFrame) connection.SelectSimulated();
+                if (kb.digit6Key.wasPressedThisFrame) connection.SelectTcp();
+                if (kb.digit7Key.wasPressedThisFrame) connection.SelectWebSocket();
             }
             if (kb.rKey.wasPressedThisFrame && placer) { placer.Replace(); framed = false; }
         }

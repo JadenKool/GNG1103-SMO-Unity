@@ -117,7 +117,7 @@ namespace Eosat
             moving ? $"<color=#ffbf33>MOVING {fraction * 100f:F0}%</color>" : state.ToUpperInvariant();
 
         string TcpNote() =>
-            hub.source == TelemetrySourceMode.Tcp && !hub.TcpConnected && !string.IsNullOrEmpty(hub.TcpError) ? "- " + hub.TcpError : "";
+            hub.IsNetworkSource && !hub.TcpConnected && !string.IsNullOrEmpty(hub.TcpError) ? "- " + hub.TcpError : "";
 
         // ---------- Desktop vs VR ----------
 

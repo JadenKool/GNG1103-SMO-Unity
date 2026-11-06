@@ -22,7 +22,7 @@ namespace Eosat
         public bool disableBuiltInSimulator = true;
 
         public bool Loaded => lines.Count > 0;
-        public bool Running => Loaded && enabled && hub && hub.source == TelemetrySourceMode.Simulated;
+        public bool Running => Loaded && enabled && hub && hub.source == DataSource.SimulatedLocal;
         public float MetSeconds => met;
         public float DurationSeconds { get; private set; }
         /// <summary>Every recorded position (ECI, km) - the full orbit, for drawing the path.</summary>

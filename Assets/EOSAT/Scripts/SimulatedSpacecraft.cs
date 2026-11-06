@@ -50,7 +50,7 @@ namespace Eosat
 
         void Update()
         {
-            if (hub.source != TelemetrySourceMode.Simulated) return;
+            if (hub.source != DataSource.SimulatedLocal) return;
             HandleKeys();
 
             elapsed += Time.deltaTime;

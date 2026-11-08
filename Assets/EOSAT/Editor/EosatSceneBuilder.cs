@@ -160,6 +160,7 @@ namespace Eosat.EditorTools
 
             EosatMarkerSetup.ApplyToActiveScene(); // Concept 4 yellow dot + client data replay
             EditorSceneManager.SaveScene(scene, ScenePath);
+            EosatAttitudeSetup.ApplyToActiveScene(); // direction of travel + quaternion / spin guides
             AddToBuildSettings(ScenePath);
             AssetDatabase.SaveAssets();
             Selection.activeGameObject = sc;

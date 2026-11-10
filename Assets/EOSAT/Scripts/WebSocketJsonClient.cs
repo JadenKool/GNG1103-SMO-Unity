@@ -31,7 +31,7 @@ namespace Eosat
         readonly object gate = new object();
 
         public bool Connected => connected;
-        public string LastError => lastError;
+        public string LastError => lastError?.Replace("\0", "").Trim();   // Windows socket messages can be NUL-padded
         public WebSocketState State { get { var s = socket; try { return s?.State ?? WebSocketState.None; } catch { return WebSocketState.None; } } }
         public string Label => $"WebSocket: {Uri.Port}";
 

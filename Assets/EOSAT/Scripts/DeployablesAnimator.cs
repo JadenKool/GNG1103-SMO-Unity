@@ -17,6 +17,8 @@ namespace Eosat
         [Tooltip("Target spec: 30 s solar panel deployment animation.")]
         public float panelDeploySeconds = 30f;
         public float antennaDeploySeconds = 5f;
+        [Tooltip("Panel animation time when a toggle is pressed by hand (the 30 s spec applies to telemetry-driven deployment).")]
+        public float manualPanelSeconds = 4f;
         [Tooltip("How quickly a wing catches up to the simulator's fraction (1/s). Higher = tighter follow.")]
         public float wingFollowRate = 4f;
         public float panelStowedAngle = 90f;
@@ -45,10 +47,20 @@ namespace Eosat
 
         static bool InBetween(float f) => f > 0.001f && f < 0.999f;
 
+        float activePanelSeconds = -1f;
+
+        /// <summary>Manual toggle: same as SetTargets but the panels animate in manualPanelSeconds.</summary>
+        public void SetTargetsManual(PanelState panels, AntennaState antenna)
+        {
+            SetTargets(panels, antenna);
+            if (panels != PanelState.Unknown) activePanelSeconds = manualPanelSeconds;
+        }
+
         public void SetTargets(PanelState panels, AntennaState antenna)
         {
             if (panels != PanelState.Unknown)
             {
+                activePanelSeconds = panelDeploySeconds;
                 Panels = panels;
                 dataWings = false;
                 pyTarget = myTarget = panels == PanelState.Deployed ? 1f : 0f;
@@ -75,7 +87,7 @@ namespace Eosat
             }
             else
             {
-                float step = Time.deltaTime / Mathf.Max(0.01f, panelDeploySeconds);
+                float step = Time.deltaTime / Mathf.Max(0.01f, activePanelSeconds > 0f ? activePanelSeconds : panelDeploySeconds);
                 WingPyFraction = Mathf.MoveTowards(WingPyFraction, pyTarget, step);
                 WingMyFraction = Mathf.MoveTowards(WingMyFraction, myTarget, step);
             }

@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.Events;
 
 namespace Eosat.MR
@@ -11,6 +11,8 @@ namespace Eosat.MR
     public class SatelliteDeployControl : MonoBehaviour
     {
         public DeployablesAnimator deployables;
+        [Tooltip("Other models that must show the same state (e.g. the VR spacecraft). Driven together with the main one.")]
+        public DeployablesAnimator[] mirrors = System.Array.Empty<DeployablesAnimator>();
         public TelemetryHub hub;
         [Tooltip("Follow the simulator's deploy states. Off = tablet only.")]
         public bool followTelemetry = true;
@@ -43,15 +45,22 @@ namespace Eosat.MR
             if (!deployables) deployables = GetComponentInChildren<DeployablesAnimator>();
         }
 
+        // Apply the same command to the main model and every mirror.
+        void All(System.Action<DeployablesAnimator> act)
+        {
+            if (deployables) act(deployables);
+            if (mirrors != null) foreach (var m in mirrors) if (m && m != deployables) act(m);
+        }
+
         void OnEnable() { if (hub) hub.SampleReceived += OnSample; }
         void OnDisable() { if (hub) hub.SampleReceived -= OnSample; }
 
         void Start()
         {
             if (!deployables || (followTelemetry && hub)) return;
-            deployables.SetTargets(
+            All(d => d.SetTargets(
                 panelsStartDeployed ? PanelState.Deployed : PanelState.Stowed,
-                antennaStartsDeployed ? AntennaState.Deployed : AntennaState.Stowed);
+                antennaStartsDeployed ? AntennaState.Deployed : AntennaState.Stowed));
         }
 
         void OnSample(TelemetrySample s)
@@ -61,7 +70,7 @@ namespace Eosat.MR
             if (s.antenna != AntennaState.Unknown)
             {
                 if (s.antenna != lastDataAntenna) { lastDataAntenna = s.antenna; AntennaManual = false; }
-                if (!AntennaManual) deployables.SetTargets(PanelState.Unknown, s.antenna);
+                if (!AntennaManual) All(d => d.SetTargets(PanelState.Unknown, s.antenna));
             }
 
             int panelsKey = s.hasWings ? (s.wingPyFraction + s.wingMyFraction > 0.002f ? 1 : 0)
@@ -71,8 +80,8 @@ namespace Eosat.MR
                 if (panelsKey != lastDataPanels) { lastDataPanels = panelsKey; PanelsManual = false; }
                 if (!PanelsManual)
                 {
-                    if (s.hasWings) deployables.SetWingFractions(s.wingPyFraction, s.wingMyFraction);
-                    else deployables.SetTargets(s.panels, AntennaState.Unknown);
+                    if (s.hasWings) All(d => d.SetWingFractions(s.wingPyFraction, s.wingMyFraction));
+                    else All(d => d.SetTargets(s.panels, AntennaState.Unknown));
                 }
             }
         }
@@ -81,7 +90,7 @@ namespace Eosat.MR
         {
             if (!deployables || AntennaDeployed == deployed) return;
             AntennaManual = true;
-            deployables.SetTargets(PanelState.Unknown, deployed ? AntennaState.Deployed : AntennaState.Stowed);
+            All(d => d.SetTargetsManual(PanelState.Unknown, deployed ? AntennaState.Deployed : AntennaState.Stowed));
             onAntennaStateChanged?.Invoke(deployed);
         }
 
@@ -89,7 +98,7 @@ namespace Eosat.MR
         {
             if (!deployables || PanelsDeployed == deployed) return;
             PanelsManual = true;
-            deployables.SetTargets(deployed ? PanelState.Deployed : PanelState.Stowed, AntennaState.Unknown);
+            All(d => d.SetTargetsManual(deployed ? PanelState.Deployed : PanelState.Stowed, AntennaState.Unknown));
             onPanelsStateChanged?.Invoke(deployed);
         }
 

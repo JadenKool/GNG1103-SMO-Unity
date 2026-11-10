@@ -69,7 +69,7 @@ namespace Eosat
                             ReadObjects(reader);
                     }
                 }
-                catch (Exception e) { LastError = e.Message; }
+                catch (Exception e) { LastError = e.Message.Replace("\0", "").Trim(); }
                 connected = false;
                 if (running) Thread.Sleep(2000);
             }

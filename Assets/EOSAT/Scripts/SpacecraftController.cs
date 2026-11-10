@@ -63,7 +63,10 @@ namespace Eosat
             if (trail) trail.emitting = false;
         }
 
-        void OnEnable() { if (hub) hub.SampleReceived += OnSample; }
+        // Re-enabled after being switched off (MR <-> VR): the stored pose is stale. Hold it and SNAP to the next
+        // sample instead of gliding/extrapolating from the old one (that smeared trails and the flight map).
+        bool resnap;
+        void OnEnable() { if (hub) hub.SampleReceived += OnSample; if (HasData) resnap = true; }
         void OnDisable() { if (hub) hub.SampleReceived -= OnSample; }
 
         void OnSample(TelemetrySample s)
@@ -74,8 +77,9 @@ namespace Eosat
             double t = s.hasTime ? s.unixTime : EciMath.UnixNow();
             latest = s;
 
-            if (!HasData)
+            if (!HasData || resnap)
             {
+                resnap = false;
                 HasData = true;
                 startPos = endPos = dispPos = p;
                 startRot = endRot = dispRot = q;
@@ -126,7 +130,7 @@ namespace Eosat
 
         void Update()
         {
-            if (!HasData) return;
+            if (!HasData || resnap) return;
             float now = Time.time;
             float a = (now - segStart) / segDur;
             Vector3 p; Quaternion r; double t;

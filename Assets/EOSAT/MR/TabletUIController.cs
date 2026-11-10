@@ -28,6 +28,8 @@ namespace Eosat.MR
         public EnvironmentManager environment;
         [Tooltip("Meta SDK scene: the AR/VR toggle drives this instead of EnvironmentManager.")]
         public Eosat.Meta.PassthroughToggle metaPassthrough;
+        [Tooltip("Combined scene: the AR/VR toggle switches MR tabletop <-> VR platform.")]
+        public Eosat.Meta.EnvironmentSwitcher switcher;
 
         [Header("Feedback")]
         public AudioSource clickSound;
@@ -37,7 +39,7 @@ namespace Eosat.MR
             if (dataToggle) dataToggle.onValueChanged.AddListener(OnDataToggled);
             if (antennaToggle) antennaToggle.onValueChanged.AddListener(OnAntennaToggled);
             if (panelsToggle) panelsToggle.onValueChanged.AddListener(OnPanelsToggled);
-            if (arVrToggle && metaPassthrough) arVrToggle.onValueChanged.AddListener(OnArVrToggled);
+            if (arVrToggle && (metaPassthrough || switcher)) arVrToggle.onValueChanged.AddListener(OnArVrToggled);
             SyncFromScene();
         }
 
@@ -46,12 +48,13 @@ namespace Eosat.MR
             if (dataToggle) dataToggle.onValueChanged.RemoveListener(OnDataToggled);
             if (antennaToggle) antennaToggle.onValueChanged.RemoveListener(OnAntennaToggled);
             if (panelsToggle) panelsToggle.onValueChanged.RemoveListener(OnPanelsToggled);
-            if (arVrToggle && metaPassthrough) arVrToggle.onValueChanged.RemoveListener(OnArVrToggled);
+            if (arVrToggle && (metaPassthrough || switcher)) arVrToggle.onValueChanged.RemoveListener(OnArVrToggled);
         }
 
         public void OnArVrToggled(bool passthrough)
         {
-            if (metaPassthrough) metaPassthrough.SetPassthrough(passthrough);
+            if (switcher) switcher.SetMR(passthrough);
+            else if (metaPassthrough) metaPassthrough.SetPassthrough(passthrough);
             Click();
         }
 
@@ -89,7 +92,14 @@ namespace Eosat.MR
                 if (dataToggle) dataToggle.SetIsOnWithoutNotify(telemetry.Visible);
                 SetLabel(dataStatus, telemetry.Visible ? "ON" : "OFF");
             }
-            if (metaPassthrough)
+            if (switcher)
+            {
+                if (arVrToggle) arVrToggle.SetIsOnWithoutNotify(switcher.IsMR);
+                SetLabel(arVrStatus, switcher.IsMR
+                    ? (switcher.PassthroughRunning ? "MR TABLETOP  |  sticks zoom, A / X recentre" : "MR TABLETOP  |  no passthrough (grey)")
+                    : "VR ORBIT  |  R stick orbit, L stick zoom");
+            }
+            else if (metaPassthrough)
             {
                 if (arVrToggle) arVrToggle.SetIsOnWithoutNotify(metaPassthrough.IsPassthrough);
                 SetLabel(arVrStatus, metaPassthrough.IsPassthrough

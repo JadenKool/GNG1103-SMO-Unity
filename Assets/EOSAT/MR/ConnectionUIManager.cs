@@ -27,8 +27,41 @@ namespace Eosat.MR
         [Tooltip("Rich-text colour of CONNECTED. Unity's named 'green' is #008000 (too dark on the tablet), so a bright green is used.")]
         public string connectedColor = "#39FF6A";
 
+        [Header("Custom IP address")]
+        [Tooltip("Type with a keyboard, or use the on-screen keypad (KeypadPress).")]
+        public InputField hostField;
+        public Text hostStatus;
+        public int maxHostLength = 21;      // 255.255.255.255:8101
+
         float nextRefresh;
         string lastStatus, lastDetail;
+
+        void Start()
+        {
+            if (hostField && hub && string.IsNullOrEmpty(hostField.text)) hostField.text = hub.host;
+        }
+
+        // ---- On-screen keypad (each key's OnClick passes its own character) ----
+        public void KeypadPress(string key)
+        {
+            if (!hostField || string.IsNullOrEmpty(key)) return;
+            if (hostField.text.Length + key.Length > maxHostLength) return;
+            hostField.text += key;
+        }
+        public void KeypadBackspace() { if (hostField && hostField.text.Length > 0) hostField.text = hostField.text.Substring(0, hostField.text.Length - 1); }
+        public void KeypadClear() { if (hostField) hostField.text = ""; }
+        public void UseLocalhost() { if (hostField) hostField.text = "127.0.0.1"; ApplyCustomHost(); }
+
+        /// <summary>"Set IP" button: point TCP + WebSocket at the typed address.</summary>
+        public void ApplyCustomHost()
+        {
+            if (!hub || !hostField) return;
+            bool ok = hub.SetCustomHost(hostField.text);
+            if (hostStatus) hostStatus.text = ok
+                ? $"<color={connectedColor}>Address set: {hub.host}</color>  (TCP {hub.port}, WebSocket 8101). Now press TCP or WS."
+                : "<color=#FF6A6A>" + hub.LastHostError + "</color>";
+            nextRefresh = 0f;
+        }
 
         void OnEnable()
         {

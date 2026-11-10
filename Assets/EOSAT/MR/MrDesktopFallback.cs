@@ -44,6 +44,8 @@ namespace Eosat.MR
         public float scrollStep = 0.1f;
         [Tooltip("Tablet position relative to the camera (m): left, down, forward.")]
         public Vector3 tabletOffset = new Vector3(-0.17f, -0.07f, 0.45f);
+        [Tooltip("Eye position used on desktop when there is no tablet/focus to frame (m, rig space).")]
+        public Vector3 desktopEyePosition = new Vector3(0f, 1.5f, 0f);
 
         public bool Active { get; private set; }
         float yaw, pitch;
@@ -66,16 +68,25 @@ namespace Eosat.MR
             var tpd = cam.GetComponent<TrackedPoseDriver>();
             if (tpd) tpd.enabled = false;
 
-            Transform root = handTablet ? handTablet.transform : tabletCanvas.transform;
-            if (handTablet) handTablet.enabled = false;
-            root.SetParent(cam.transform, false);
-            root.localPosition = tabletOffset;
-            root.localRotation = Quaternion.identity;
+            if (handTablet || tabletCanvas)
+            {
+                Transform root = handTablet ? handTablet.transform : tabletCanvas.transform;
+                if (handTablet) handTablet.enabled = false;
+                root.SetParent(cam.transform, false);
+                root.localPosition = tabletOffset;
+                root.localRotation = Quaternion.identity;
+            }
+            else cam.transform.localPosition = desktopEyePosition;     // free-floating screens: stand where a user would
 
-            tabletCanvas.gameObject.SetActive(true);
+            if (tabletCanvas) tabletCanvas.gameObject.SetActive(true);
             if (hideOnDesktop) hideOnDesktop.SetActive(false);
-            tabletCanvas.worldCamera = cam;
-            if (!tabletCanvas.GetComponent<GraphicRaycaster>()) tabletCanvas.gameObject.AddComponent<GraphicRaycaster>();
+            // Every world-space canvas (the floating screens) becomes clickable with the mouse.
+            foreach (var c in FindObjectsByType<Canvas>(FindObjectsInactive.Include))
+            {
+                if (c.renderMode != RenderMode.WorldSpace) continue;
+                c.worldCamera = cam;
+                if (!c.GetComponent<GraphicRaycaster>()) c.gameObject.AddComponent<GraphicRaycaster>();
+            }
             EnableMouseUi();
             if (desktopHint) desktopHint.SetActive(true);
             cam.clearFlags = CameraClearFlags.SolidColor;

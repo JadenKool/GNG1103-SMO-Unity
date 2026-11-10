@@ -6,6 +6,9 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Scenes/EOSAT_Combined.unity
+    guid: c8fd19fd0a782b64bbb4e08bec2e65fd
+  - enabled: 1
     path: Assets/Scenes/EOSAT_Visualization.unity
     guid: 45a581d3b13112f4da13cdae56548854
   - enabled: 1

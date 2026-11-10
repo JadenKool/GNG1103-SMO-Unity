@@ -77,12 +77,31 @@ namespace Eosat.Meta
             Apply(mr);
         }
 
+        [Tooltip("Ignore presses closer together than this (stops accidental rapid flipping = flashing).")]
+        [SerializeField] float minSecondsBetweenToggles = 0.6f;
+        float lastToggleTime = -10f;
+
         void Update()
         {
+            // Passthrough can finish initialising after Start: switch grey -> transparent once it is up.
+            if (IsPassthrough && centerEyeCamera && centerEyeCamera.clearFlags == CameraClearFlags.SolidColor)
+            {
+                var want = PassthroughRunning ? Transparent : desktopBackground;
+                if (centerEyeCamera.backgroundColor != want) centerEyeCamera.backgroundColor = want;
+            }
+
             // GetDown = true only on the frame the button goes down (no repeat while held).
             if (OVRInput.GetDown(toggleButton, controllers) || OVRInput.GetDown(alternateButton, controllers))
+            {
+                if (Time.unscaledTime - lastToggleTime < minSecondsBetweenToggles) return;
+                lastToggleTime = Time.unscaledTime;
                 Toggle();
+            }
         }
+
+        /// <summary>Passthrough really running (false over Link without passthrough enabled -> would be pure black).</summary>
+        static bool PassthroughRunning => PassthroughAvailableStatic && OVRManager.IsInsightPassthroughInitialized();
+        static bool PassthroughAvailableStatic => UnityEngine.XR.XRSettings.isDeviceActive;
 
         /// <summary>Flip MR <-> VR. Public so a UI button or gesture can call it too.</summary>
         public void Toggle() => Apply(!IsPassthrough);
@@ -114,7 +133,8 @@ namespace Eosat.Meta
                 {
                     // Alpha 0 everywhere nothing virtual is drawn -> the Underlay passthrough shows through.
                     centerEyeCamera.clearFlags = CameraClearFlags.SolidColor;
-                    centerEyeCamera.backgroundColor = PassthroughAvailable ? Transparent : desktopBackground;
+                    // No camera feed (desktop, or Link with passthrough off): neutral grey instead of pure black.
+                    centerEyeCamera.backgroundColor = PassthroughRunning ? Transparent : desktopBackground;
                 }
                 else
                 {

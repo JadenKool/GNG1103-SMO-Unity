@@ -59,6 +59,15 @@ namespace Eosat
         void Update()
         {
             if (!urp) return;
+            // Never touch render scale in VR: each change re-allocates the eye buffers (black flash on Link)
+            // and URP's upscaling pass in XR is slower than just rendering at full scale (11 fps in testing).
+            // XR can start after Start(), so check every frame.
+            if (XRSettings.isDeviceActive)
+            {
+                if (CurrentScale != originalScale) { urp.renderScale = originalScale; CurrentScale = originalScale; }
+                acc = 0f; frames = 0; maxDt = 0f;
+                return;
+            }
             acc += Time.unscaledDeltaTime;
             maxDt = Mathf.Max(maxDt, Time.unscaledDeltaTime);
             frames++;

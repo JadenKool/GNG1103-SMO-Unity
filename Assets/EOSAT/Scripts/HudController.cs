@@ -23,6 +23,8 @@ namespace Eosat
         [Header("VR panel")]
         [Tooltip("Distance of the floating HUD panel in front of the headset (m).")]
         public float vrPanelDistance = 2f;
+        [Tooltip("Metres below the line of sight (0 = centred). Keeps the panel out of the way of what you are looking at.")]
+        public float vrPanelDrop = 0f;
         [Tooltip("World size of one UI pixel in VR (m). 0.0016 makes the 1300 px panel ~2 m wide.")]
         public float vrPixelSize = 0.0016f;
         public float vrFollowSpeed = 2.5f;
@@ -40,15 +42,14 @@ namespace Eosat
         const float TextRefreshSeconds = 0.2f;
 
         const string DesktopHint = "H  guide     1  spacecraft view     2  Earth view     drag  orbit     scroll  zoom";
-        const string VrHint = "B / Y  guide     A / X  switch view     thumbstick  turn & zoom";
+        const string VrHint = "right stick  orbit     left stick  zoom     A / X  recentre     B / Y  MR <-> VR     menu  guide";
 
         void Awake() => Build();
 
         void OnEnable()
         {
             guideButton = new InputAction("EOSAT Guide", InputActionType.Button);
-            guideButton.AddBinding("<XRController>{RightHand}/{SecondaryButton}");
-            guideButton.AddBinding("<XRController>{LeftHand}/{SecondaryButton}");
+            guideButton.AddBinding("<XRController>{LeftHand}/{MenuButton}");   // B / Y switch MR <-> VR in the combined scene
             guideButton.AddBinding("<Gamepad>/buttonNorth");
             guideButton.Enable();
         }
@@ -151,10 +152,10 @@ namespace Eosat
             if (!cam) return;
             var c = cam.transform;
             var t = canvas.transform;
-            Vector3 goal = c.position + c.forward * vrPanelDistance;
+            Vector3 goal = c.position + c.forward * vrPanelDistance - c.up * vrPanelDrop;
             // Lazy follow: the panel drifts after your gaze instead of being glued to your face.
             t.position = snapPanel ? goal : Vector3.Lerp(t.position, goal, 1f - Mathf.Exp(-vrFollowSpeed * Time.deltaTime));
-            t.rotation = Quaternion.LookRotation(t.position - c.position, Vector3.up);
+            t.rotation = Quaternion.LookRotation(t.position - c.position, c.parent ? c.parent.up : Vector3.up);   // player's own up (rig tilts while orbiting)
             snapPanel = false;
         }
 

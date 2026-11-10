@@ -48,6 +48,23 @@ namespace Eosat
 
         public event Action<TelemetrySample> SampleReceived;
         public event Action<DataSource> SourceChanged;
+        /// <summary>Raised once when the feed goes quiet for staleAfterSeconds (UI dims, "Prediction Mode").</summary>
+        public event Action DataLost;
+        /// <summary>Raised when samples arrive again after a loss.</summary>
+        public event Action DataRestored;
+        /// <summary>Raised after SetCustomHost changed the address.</summary>
+        public event Action<string> HostChanged;
+
+        /// <summary>True once any sample has ever arrived (so "lost" is not shown before the first connection).</summary>
+        public bool HasEverReceived { get; private set; }
+        /// <summary>Data was flowing and has stopped: the spacecraft is being shown from prediction.</summary>
+        public bool PredictionMode => HasEverReceived && !ReceivingData;
+        /// <summary>Seconds since the last valid sample (0 before the first one).</summary>
+        public float SecondsSinceData => HasEverReceived ? Mathf.Max(0f, Time.time - LastSampleRealtime) : 0f;
+        /// <summary>Why the last SetCustomHost call was refused (null if it was accepted).</summary>
+        public string LastHostError { get; private set; }
+        bool lossRaised;
+        float lastGoodRealtime = -100f;
 
         public int GoodPackets { get; private set; }
         public int BadPackets { get; private set; }
@@ -73,7 +90,7 @@ namespace Eosat
         public string SourceLabel => source switch
         {
             DataSource.Tcp8100 => $"TCP: {host}:{port}",
-            DataSource.WebSocket8101 => $"WebSocket: {WebSocketPort}",
+            DataSource.WebSocket8101 => $"WebSocket: {host}:{WebSocketPort}",
             _ => "Simulated (local)"
         };
 
@@ -104,6 +121,50 @@ namespace Eosat
 
         /// <summary>For UI events that pass an int (Dropdown etc.).</summary>
         public void SwitchDataSource(int newSource) => SwitchDataSource((DataSource)Mathf.Clamp(newSource, 0, 2));
+
+        /// <summary>
+        /// Point the TCP and WebSocket feeds at another computer. Accepts "192.168.1.20", "192.168.1.20:8100"
+        /// or a host name. Ports stay inside the allowed 8100-8101 range. If a network source is active it
+        /// reconnects to the new address straight away. Returns false (see LastHostError) for bad input.
+        /// </summary>
+        public bool SetCustomHost(string address)
+        {
+            LastHostError = null;
+            address = (address ?? "").Trim();
+            if (address.StartsWith("ws://", StringComparison.OrdinalIgnoreCase)) address = address.Substring(5);
+            int slash = address.IndexOf('/'); if (slash >= 0) address = address.Substring(0, slash);
+            string newHost = address; int newPort = -1;
+            int colon = address.LastIndexOf(':');
+            if (colon > 0)
+            {
+                newHost = address.Substring(0, colon);
+                if (!int.TryParse(address.Substring(colon + 1), out newPort)) { LastHostError = "Port must be a number"; return false; }
+                if (newPort < 8100 || newPort > 8101) { LastHostError = "Port must be 8100 (TCP) or 8101 (WebSocket)"; return false; }
+            }
+            if (newHost.Length == 0) { LastHostError = "Type an IP address first"; return false; }
+            if (Uri.CheckHostName(newHost) == UriHostNameType.Unknown) { LastHostError = "Not a valid IP address or host name"; return false; }
+            // Four dot-separated numbers must each be 0-255 (Uri accepts things like "300.1.1.1" as a DNS name).
+            var parts = newHost.Split('.');
+            if (parts.Length == 4 && Array.TrueForAll(parts, p => int.TryParse(p, out _)) && !Array.TrueForAll(parts, p => int.Parse(p) <= 255))
+            { LastHostError = "Each IP number must be 0-255"; return false; }
+
+            string path = "/vr"; int wsPort = WebSocketPort;
+            try { var u = new Uri(webSocketUri); path = u.AbsolutePath; } catch { }
+            host = newHost;
+            if (newPort == 8100) port = 8100;
+            if (newPort == 8101) wsPort = 8101;
+            webSocketUri = $"ws://{host}:{wsPort}{path}";
+
+            if (IsNetworkSource)
+            {
+                StopClient();
+                ResetFeedState();
+                if (isActiveAndEnabled) StartClient();
+            }
+            Debug.Log("[EOSAT] Telemetry host -> " + host + " (" + SourceLabel + ")");
+            HostChanged?.Invoke(host);
+            return true;
+        }
 
         void StartClient()
         {
@@ -142,6 +203,11 @@ namespace Eosat
 
             while (stamps.Count > 0 && Time.time - stamps.Peek() > 5f) stamps.Dequeue();
             PacketRateHz = stamps.Count / 5f;
+
+            // Data-loss state machine: one event when the feed goes quiet, one when it comes back.
+            bool quiet = HasEverReceived && Time.time - lastGoodRealtime > staleAfterSeconds;
+            if (quiet && !lossRaised) { lossRaised = true; Debug.LogWarning("[EOSAT] Telemetry lost - prediction mode (" + SourceLabel + ")"); DataLost?.Invoke(); }
+            else if (!quiet && lossRaised) { lossRaised = false; Debug.Log("[EOSAT] Telemetry restored (" + SourceLabel + ")"); DataRestored?.Invoke(); }
         }
 
         /// <summary>Feed one raw JSON message into the pipeline.</summary>
@@ -154,6 +220,8 @@ namespace Eosat
                 lastSeq = sample.seq;
                 sample.receivedRealtime = Time.time;
                 LastSampleRealtime = Time.time;
+                lastGoodRealtime = Time.time;     // survives a source switch, so a dead new source still counts as "lost"
+                HasEverReceived = true;
                 GoodPackets++;
                 stamps.Enqueue(Time.time);
                 SampleReceived?.Invoke(sample);

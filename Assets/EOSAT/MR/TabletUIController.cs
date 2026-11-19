@@ -124,6 +124,7 @@ namespace Eosat.MR
 
         static void SetLabel(Text label, string value)
         {
+            value = LocalizationManager.Tr(value);
             if (label && label.text != value) label.text = value;
         }
 

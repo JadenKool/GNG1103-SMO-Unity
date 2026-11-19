@@ -6,6 +6,7 @@ namespace Eosat
 {
     /// <summary>Where telemetry comes from. Values 0/1 match the old Simulated/Tcp so saved scenes keep their choice.</summary>
     public enum DataSource { SimulatedLocal = 0, Tcp8100 = 1, WebSocket8101 = 2 }
+    public enum DataState { Waiting, Live, Delayed, Ghost, Lost }
 
     /// <summary>A background network feed that hands complete JSON strings to the main thread.</summary>
     public interface ITelemetryClient
@@ -46,7 +47,30 @@ namespace Eosat
         [Tooltip("No sample for this long = not receiving.")]
         public float staleAfterSeconds = 3f;
 
+        [Header("Buffer")]
+        [Tooltip("Startup buffer: for this many seconds frames are only cached (nothing moves) while a loading screen shows; " +
+                 "then the newest frame starts the simulation. 0 = start immediately.")]
+        public float startupBufferSeconds = 0f;
+        [Tooltip("Rolling cache of received frames, in seconds of real time (design: 60-sample cache at 1 Hz).")]
+        public float historySeconds = 60f;
+
         public event Action<TelemetrySample> SampleReceived;
+        /// <summary>Raised once when the startup buffer ends and the simulation starts.</summary>
+        public event Action BufferComplete;
+
+        /// <summary>Still inside the startup buffer: frames are cached, SampleReceived is held back.</summary>
+        public bool Buffering => !bufferReleased;
+        public float BufferSecondsLeft => Mathf.Max(0f, startupBufferSeconds - (Time.time - bufferStart));
+        public float BufferProgress => startupBufferSeconds <= 0f ? 1f : Mathf.Clamp01((Time.time - bufferStart) / startupBufferSeconds);
+        /// <summary>Frames received in the last historySeconds, oldest first.</summary>
+        public IReadOnlyCollection<TelemetrySample> History => history;
+        /// <summary>Antenna deployment 0-100 % from the feed (its fraction if sent, else 0 / 100 from the state); -1 = unknown.</summary>
+        public float AntennaPercent { get; private set; } = -1f;
+
+        readonly Queue<TelemetrySample> history = new Queue<TelemetrySample>();
+        TelemetrySample heldLatest;
+        float bufferStart;
+        bool bufferReleased;
         public event Action<DataSource> SourceChanged;
         /// <summary>Raised once when the feed goes quiet for staleAfterSeconds (UI dims, "Prediction Mode").</summary>
         public event Action DataLost;
@@ -61,6 +85,17 @@ namespace Eosat
         public bool PredictionMode => HasEverReceived && !ReceivingData;
         /// <summary>Seconds since the last valid sample (0 before the first one).</summary>
         public float SecondsSinceData => HasEverReceived ? Mathf.Max(0f, Time.time - LastSampleRealtime) : 0f;
+
+        /// <summary>Data states from the Deliverable D/E design: LIVE &lt; 2 s, DELAYED 2-5 s, GHOST &gt; 5 s, LOST &gt; 60 s.</summary>
+        public DataState State
+        {
+            get
+            {
+                if (!HasEverReceived) return DataState.Waiting;
+                float s = SecondsSinceData;
+                return s < 2f ? DataState.Live : s <= 5f ? DataState.Delayed : s <= 60f ? DataState.Ghost : DataState.Lost;
+            }
+        }
         /// <summary>Why the last SetCustomHost call was refused (null if it was accepted).</summary>
         public string LastHostError { get; private set; }
         bool lossRaised;
@@ -100,6 +135,7 @@ namespace Eosat
         readonly Queue<float> stamps = new Queue<float>();
         long lastSeq = -1;
 
+        void Awake() { bufferStart = Time.time; bufferReleased = startupBufferSeconds <= 0f; }
         void OnEnable() => StartClient();
         void OnDisable() => StopClient();
         void OnApplicationQuit() => StopClient();
@@ -201,6 +237,15 @@ namespace Eosat
                 while (n++ < maxMessagesPerFrame && client != null && client.TryDequeue(out var json)) Submit(json);
             }
 
+            // Startup buffer over: the newest cached frame starts the simulation (snaps, no replay of the backlog).
+            if (!bufferReleased && Time.time - bufferStart >= startupBufferSeconds)
+            {
+                bufferReleased = true;
+                Debug.Log($"[EOSAT] Startup buffer done: {history.Count} frames cached");
+                if (heldLatest != null) SampleReceived?.Invoke(heldLatest);
+                BufferComplete?.Invoke();
+            }
+
             while (stamps.Count > 0 && Time.time - stamps.Peek() > 5f) stamps.Dequeue();
             PacketRateHz = stamps.Count / 5f;
 
@@ -224,6 +269,12 @@ namespace Eosat
                 HasEverReceived = true;
                 GoodPackets++;
                 stamps.Enqueue(Time.time);
+                history.Enqueue(sample);
+                while (history.Count > 0 && Time.time - history.Peek().receivedRealtime > historySeconds) history.Dequeue();
+                if (sample.hasAntennaFraction) AntennaPercent = sample.antennaFraction * 100f;
+                else if (sample.antenna == AntennaState.Deployed) AntennaPercent = 100f;
+                else if (sample.antenna == AntennaState.Stowed) AntennaPercent = 0f;
+                if (!bufferReleased) { heldLatest = sample; return; }
                 SampleReceived?.Invoke(sample);
             }
             else if (ignored)

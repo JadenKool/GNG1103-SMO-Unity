@@ -15,14 +15,22 @@ namespace Eosat.MR
         public Text dataText;
         [Range(1f, 20f)] public float refreshHz = 5f;
 
+        [Header("Antenna deployment bar (optional)")]
+        [Tooltip("Image Type = Filled, Horizontal: fillAmount = antenna deployment.")]
+        public Image antennaFill;
+        public Text antennaText;
+        [Tooltip("Used while the feed sends no antenna percentage: shows the animated deploy progress instead.")]
+        public SatelliteDeployControl deploy;
+
         TelemetrySample last, prev;
         float velocityKmS = float.NaN;
         float nextRefresh;
         bool dirty = true;
         readonly StringBuilder sb = new StringBuilder(256);
 
-        void OnEnable() { if (hub) { hub.SampleReceived += OnSample; hub.SourceChanged += OnSourceChanged; } }
-        void OnDisable() { if (hub) { hub.SampleReceived -= OnSample; hub.SourceChanged -= OnSourceChanged; } }
+        void OnEnable() { LocalizationManager.LanguageChanged += Relabel; if (hub) { hub.SampleReceived += OnSample; hub.SourceChanged += OnSourceChanged; } }
+        void OnDisable() { LocalizationManager.LanguageChanged -= Relabel; if (hub) { hub.SampleReceived -= OnSample; hub.SourceChanged -= OnSourceChanged; } }
+        void Relabel() { shownPct = -2f; dirty = true; nextRefresh = 0f; }
 
         void OnSourceChanged(DataSource _) { last = prev = null; velocityKmS = float.NaN; dirty = true; }
 
@@ -40,11 +48,12 @@ namespace Eosat.MR
 
         void Update()
         {
+            UpdateAntennaBar();
             if (!dirty || !dataText || Time.unscaledTime < nextRefresh) return;
             nextRefresh = Time.unscaledTime + 1f / refreshHz;
             dirty = false;
 
-            if (last == null) { dataText.text = "Waiting for telemetry..."; return; }
+            if (last == null) { dataText.text = LocalizationManager.Tr("Waiting for telemetry..."); return; }
 
             float earthR = last.earthRadiusKm > 0f ? last.earthRadiusKm : (float)EciMath.EarthRadiusKm;
             sb.Clear();
@@ -54,7 +63,20 @@ namespace Eosat.MR
             sb.Append("MODE  ").Append(Or(last.scMode)).Append("   AOCS ").Append(Or(last.aocsMode)).Append('\n');
             sb.Append("POINT ").Append(Or(last.pointing)).Append("   ").Append(Or(last.phase));
             if (last.inContact) sb.Append("\n<color=green>CONTACT</color> ").Append(Or(last.groundStation));
-            dataText.text = sb.ToString();
+            dataText.text = LocalizationManager.Tr(sb.ToString());
+        }
+
+        float shownPct = -2f;
+        void UpdateAntennaBar()
+        {
+            if (!antennaFill && !antennaText) return;
+            // Feed's own percentage when it sends one (last != null means the startup buffer is over), else the animated model.
+            bool fromFeed = last != null && last.hasAntennaFraction;
+            float pct = fromFeed ? hub.AntennaPercent : deploy ? deploy.AntennaProgress * 100f : hub ? hub.AntennaPercent : -1f;
+            if (Mathf.Abs(pct - shownPct) < 0.5f) return;
+            shownPct = pct;
+            if (antennaFill) antennaFill.fillAmount = Mathf.Clamp01(pct / 100f);
+            if (antennaText) antennaText.text = LocalizationManager.Tr(pct < 0f ? "ANTENNA  --" : $"ANTENNA  {pct:0}%" + (fromFeed ? "" : "  <size=18><color=#9AA6B8>(state)</color></size>"));
         }
 
         static string Or(string s) => string.IsNullOrEmpty(s) ? "--" : s;

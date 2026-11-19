@@ -54,6 +54,22 @@ namespace Eosat.MR
 
         void Awake() => SetVisible(startVisible);
 
+        // VEL straight from the hub's data (distance between the last two positions / sim time), same as the Telemetry screen.
+        TelemetrySample velPrev;
+        float velKmS = float.NaN;
+        void OnEnable() { if (hub) { hub.SampleReceived += OnSample; hub.SourceChanged += OnSourceChanged; } }
+        void OnDisable() { if (hub) { hub.SampleReceived -= OnSample; hub.SourceChanged -= OnSourceChanged; } }
+        void OnSourceChanged(DataSource _) { velPrev = null; velKmS = float.NaN; nextRefresh = 0f; }
+        void OnSample(TelemetrySample s)
+        {
+            if (velPrev != null && velPrev.hasTime && s.hasTime)
+            {
+                double dt = s.unixTime - velPrev.unixTime;
+                if (dt > 0.01 && dt < 600) velKmS = (float)((s.posEciKm - velPrev.posEciKm).magnitude / dt);
+            }
+            velPrev = s;
+        }
+
         void Start()
         {
             if (Camera.main) cam = Camera.main.transform;
@@ -99,7 +115,8 @@ namespace Eosat.MR
         void UpdateOrbitPath()
         {
             if (!orbitPath) return;
-            if (replay == null || !replay.Loaded || !spacecraft) { orbitPath.enabled = false; return; }
+            // The full path comes from the replay file: only true while the replay IS the live source (not on TCP / WS).
+            if (replay == null || !replay.Running || !spacecraft) { orbitPath.enabled = false; return; }
             orbitPath.enabled = true;
             if (pathBuilt) return;   // perf: the orbit doesn't change, and the line moves with the globe (local space)
             orbitPath.useWorldSpace = false;
@@ -158,25 +175,27 @@ namespace Eosat.MR
             nextRefresh = Time.time + readoutRefreshSeconds;
 
             float rE = s != null && s.earthRadiusKm > 0f ? s.earthRadiusKm : (float)EciMath.EarthRadiusKm;
-            float alt = spacecraft.AltitudeKm;
+            // ALT from the latest received frame (matches the Telemetry Data screen), not the smoothed display pose.
+            float alt = s != null ? s.posEciKm.magnitude - rE : spacecraft.AltitudeKm;
             float a = rE + alt;
             const float mu = 398600.4418f;
-            float vel = Mathf.Sqrt(mu / a);
             float periodMin = 2f * Mathf.PI * Mathf.Sqrt(a * a * a / mu) / 60f;
+            string vel = float.IsNaN(velKmS) ? "--" : velKmS.ToString("0.00");
 
             string clock = EciMath.FormatUtc(spacecraft.DisplayUnix);
             if (replay && replay.Running) clock += "   MET " + TimeSpan.FromSeconds(replay.MetSeconds).ToString(@"hh\:mm\:ss");
 
             string text = "<b>EOSAT-1</b>   " + clock + "\n" +
-                          $"ALT {alt:0.0} km   VEL {vel:0.00} km/s   PER {periodMin:0.0} min\n";
+                          $"ALT {alt:0.0} km   VEL {vel} km/s   PER {periodMin:0.0} min\n";
             if (s != null && (s.scMode.Length > 0 || s.aocsMode.Length > 0))
                 text += $"MODE {s.scMode}   AOCS {s.aocsMode}   {s.pointing}\n";
             text += "SUN " + (spacecraft.InEclipse ? "<color=#8899ff>ECLIPSE</color>" : "<color=#ffd34d>SUNLIT</color>");
             text += "   LINK " + (s != null && s.inContact ? $"<color=#44ff88>{s.groundStation.ToUpperInvariant()}</color>" : "<color=#888888>NO CONTACT</color>") + "\n";
             if (deploy) text += "ANT " + deploy.AntennaStatus + "\nWINGS " + deploy.PanelsStatus + "\n";
             text += "<color=#888888>" + (hub ? (replay && replay.Running ? $"CLIENT DATA REPLAY x{replay.speed:0}" : hub.SourceLabel) : "") + "</color>";
-            if (spacecraft.Stalled) text += $"\n<color=#ff6666>DATA STALLED {spacecraft.SecondsSinceData:0}s</color>";
-            readoutText.text = text;
+            if (hub && hub.State != DataState.Live)
+                text += $"\n<color={DataLossOverlay.StateColor(hub.State)}>{hub.State.ToString().ToUpperInvariant()}  {hub.SecondsSinceData:0}s since data</color>";
+            readoutText.text = LocalizationManager.Tr(text);
         }
     }
 }

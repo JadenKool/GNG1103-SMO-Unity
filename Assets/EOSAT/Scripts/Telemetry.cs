@@ -27,6 +27,7 @@ namespace Eosat
         public float earthRadiusKm;               // 0 = not sent, use EciMath.EarthRadiusKm
         public string aocsMode = "", pointing = "", scMode = "", phase = "", groundStation = "";
         public bool inContact;
+        public bool hasAntennaFraction; public float antennaFraction;   // antenna deployment 0-1, only when the feed sends it
         public bool hasEarthDirBody; public Vector3 earthDirBody;   // simulator's Earth direction in body axes (used by the self-test)
     }
 
@@ -144,7 +145,17 @@ namespace Eosat
                                   : sample.wingPyFraction <= 0.001f && sample.wingMyFraction <= 0.001f ? PanelState.Stowed
                                   : PanelState.Deployed;   // partly open = on its way out
                 }
-                if (j.deploy.antenna != null) sample.antenna = ParseAntenna(j.deploy.antenna.state);
+                if (j.deploy.antenna != null)
+                {
+                    sample.antenna = ParseAntenna(j.deploy.antenna.state);
+                    // No/unknown state string: fall back to the ICD's "deployed" bool if it was sent.
+                    if (sample.antenna == AntennaState.Unknown && json.Contains("\"deployed\""))
+                        sample.antenna = j.deploy.antenna.deployed ? AntennaState.Deployed : AntennaState.Stowed;
+                    // Deployment percentage, if the feed sends one ("fraction" 0-1 or "percent" 0-100 inside deploy.antenna).
+                    var m = System.Text.RegularExpressions.Regex.Match(json, @"""antenna""\s*:\s*\{[^}]*""(fraction|percent)""\s*:\s*([-0-9.eE]+)");
+                    if (m.Success && float.TryParse(m.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float af))
+                    { sample.hasAntennaFraction = true; sample.antennaFraction = Mathf.Clamp01(m.Groups[1].Value == "percent" ? af / 100f : af); }
+                }
             }
 
             if (j.sun != null && json.Contains("\"in_eclipse\"")) { sample.hasEclipse = true; sample.eclipse = j.sun.in_eclipse; }

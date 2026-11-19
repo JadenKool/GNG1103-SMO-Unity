@@ -19,6 +19,7 @@ namespace Eosat.Meta
         {
             if (button) button.onClick.AddListener(OnClick);
             if (orbit) orbit.TargetChanged += OnChanged;
+            LocalizationManager.LanguageChanged += Refresh;
             Refresh();
         }
 
@@ -26,6 +27,7 @@ namespace Eosat.Meta
         {
             if (button) button.onClick.RemoveListener(OnClick);
             if (orbit) orbit.TargetChanged -= OnChanged;
+            LocalizationManager.LanguageChanged -= Refresh;
         }
 
         void OnClick() { if (orbit) orbit.ToggleTarget(); }
@@ -34,8 +36,8 @@ namespace Eosat.Meta
         void Refresh()
         {
             bool sat = orbit && orbit.FollowingSatellite;
-            if (label) label.text = sat ? "CAMERA TARGET:  FOLLOW SATELLITE\n<size=20>position only - it spins, you stay steady. Press for Earth.</size>"
-                                        : "CAMERA TARGET:  FOLLOW EARTH\n<size=20>Press to follow the satellite.</size>";
+            if (label) label.text = LocalizationManager.Tr(sat ? "CAMERA TARGET:  FOLLOW SATELLITE\n<size=20>position only - it spins, you stay steady. Press for Earth.</size>"
+                                        : "CAMERA TARGET:  FOLLOW EARTH\n<size=20>Press to follow the satellite.</size>");
             if (background) background.color = sat ? satelliteColor : earthColor;
         }
     }

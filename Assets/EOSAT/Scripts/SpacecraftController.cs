@@ -56,6 +56,7 @@ namespace Eosat
         float segStart, segDur = 1f, lastSampleReal, avgInterval = 1f;
         Vector3 posAxis = Vector3.up, rotAxis = Vector3.up;
         float posRateDeg, rotRateDeg, timeRate = 1f;
+        bool rejoin;
 
         void Awake()
         {
@@ -92,6 +93,7 @@ namespace Eosat
                 return;
             }
 
+            bool afterGap = now - lastSampleReal > stallTimeoutSec;     // data came back after a loss
             float interval = Mathf.Clamp(now - lastSampleReal, 0.05f, 10f);
             ComputeRates(endPos, p, endRot, q, endT, t, interval);
             if (interval < 3f) avgInterval = Mathf.Lerp(avgInterval, interval, 0.3f);
@@ -101,8 +103,9 @@ namespace Eosat
             segStart = now;
             segDur = Mathf.Clamp(avgInterval, 0.2f, 2f);
             float expectedStep = posRateDeg * Mathf.Deg2Rad * p.magnitude * segDur;
-            if (Vector3.Distance(startPos, endPos) > catchUpDistanceUnits + expectedStep * 1.5f)
-                segDur = Mathf.Max(segDur, catchUpDurationSec);
+            // Re-join (design D/E): glide from the predicted pose to the real one over catchUpDurationSec, smoothstep + Slerp.
+            rejoin = afterGap || Vector3.Distance(startPos, endPos) > catchUpDistanceUnits + expectedStep * 1.5f;
+            if (rejoin) segDur = Mathf.Max(segDur, catchUpDurationSec);
             lastSampleReal = now;
         }
 
@@ -137,8 +140,9 @@ namespace Eosat
 
             if (a <= 1f)
             {
-                p = Vector3.Slerp(startPos, endPos, a);
-                r = Quaternion.Slerp(startRot, endRot, a);
+                float e = rejoin ? Mathf.SmoothStep(0f, 1f, a) : a;
+                p = Vector3.Slerp(startPos, endPos, e);
+                r = Quaternion.Slerp(startRot, endRot, e);
                 t = startT + (endT - startT) * a;
                 Predicting = false;
             }

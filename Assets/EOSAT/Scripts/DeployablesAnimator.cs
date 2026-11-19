@@ -12,6 +12,8 @@ namespace Eosat
     {
         [Tooltip("Right hinge = +Y wing, Left hinge = -Y wing.")]
         public Transform panelHingeLeft, panelHingeRight, antennaHinge;
+        [Tooltip("Single solar panel model: only Panel Hinge Right animates (follows the +Y wing data); Panel Hinge Left is ignored and can be empty.")]
+        public bool singlePanel;
         public Renderer antennaRenderer;
 
         [Tooltip("Target spec: 30 s solar panel deployment animation.")]
@@ -31,7 +33,7 @@ namespace Eosat
         public AntennaState Antenna { get; private set; } = AntennaState.Stowed;
         public float WingPyFraction { get; private set; }
         public float WingMyFraction { get; private set; }
-        public float PanelFraction => (WingPyFraction + WingMyFraction) * 0.5f;
+        public float PanelFraction => singlePanel ? WingPyFraction : (WingPyFraction + WingMyFraction) * 0.5f;
         public float AntennaFraction { get; private set; }
         public bool PanelsMoving => Mathf.Abs(WingPyFraction - pyTarget) > 0.01f || Mathf.Abs(WingMyFraction - myTarget) > 0.01f
                                     || (dataWings && (InBetween(pyTarget) || InBetween(myTarget)));
@@ -74,7 +76,7 @@ namespace Eosat
             dataWings = true;
             pyTarget = Mathf.Clamp01(wingPy);
             myTarget = Mathf.Clamp01(wingMy);
-            Panels = pyTarget <= 0.001f && myTarget <= 0.001f ? PanelState.Stowed : PanelState.Deployed;
+            Panels = pyTarget <= 0.001f && (singlePanel || myTarget <= 0.001f) ? PanelState.Stowed : PanelState.Deployed;
         }
 
         void Update()
@@ -94,7 +96,7 @@ namespace Eosat
             AntennaFraction = Mathf.MoveTowards(AntennaFraction, AntennaTarget, Time.deltaTime / Mathf.Max(0.01f, antennaDeploySeconds));
 
             if (panelHingeRight) panelHingeRight.localRotation = Quaternion.Euler(0f, Mathf.Lerp(panelStowedAngle, 0f, WingPyFraction), 0f);
-            if (panelHingeLeft) panelHingeLeft.localRotation = Quaternion.Euler(0f, -Mathf.Lerp(panelStowedAngle, 0f, WingMyFraction), 0f);
+            if (panelHingeLeft && !singlePanel) panelHingeLeft.localRotation = Quaternion.Euler(0f, -Mathf.Lerp(panelStowedAngle, 0f, WingMyFraction), 0f);
             if (antennaHinge) antennaHinge.localRotation = Quaternion.Euler(Mathf.Lerp(antennaStowedAngle, 0f, AntennaFraction), 0f, 0f);
 
             if (antennaRenderer)

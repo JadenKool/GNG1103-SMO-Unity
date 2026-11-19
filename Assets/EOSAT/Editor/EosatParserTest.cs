@@ -18,6 +18,16 @@ namespace Eosat.EditorTools
         [MenuItem("EOSAT/Test Parser With Client Sample File")]
         public static void Run()
         {
+            // Antenna with only the "deployed" bool (no state string) must still drive the animation.
+            const string boolOnly = "{\"type\":\"state\",\"orbit\":{\"pos_eci_km\":[6871,0,0]},\"attitude\":{\"q_body_to_eci\":[0,0,0,1]},\"deploy\":{\"antenna\":{\"deployed\":true}}}";
+            Debug.Assert(TelemetryParser.TryParse(boolOnly, true, out var bs, out _) && bs.antenna == AntennaState.Deployed, "[EOSAT test] antenna 'deployed' bool fallback FAILED");
+            const string pct = "{\"type\":\"state\",\"orbit\":{\"pos_eci_km\":[6871,0,0]},\"attitude\":{\"q_body_to_eci\":[0,0,0,1]},\"deploy\":{\"antenna\":{\"state\":\"DEPLOYING\",\"percent\":45}}}";
+            Debug.Assert(TelemetryParser.TryParse(pct, true, out var ps, out _) && ps.hasAntennaFraction && Mathf.Approximately(ps.antennaFraction, 0.45f), "[EOSAT test] antenna percent parse FAILED");
+            string lang = LocalizationManager.Language;
+            LocalizationManager.SetLanguage(LocalizationManager.French);
+            Debug.Assert(LocalizationManager.Tr("<b>CONNECTION</b> ON") == "<b>CONNEXION</b> ACTIVÉ", "[EOSAT test] French translation FAILED: " + LocalizationManager.Tr("<b>CONNECTION</b> ON"));
+            LocalizationManager.SetLanguage(lang);
+
             string path = File.Exists(DefaultPath) ? DefaultPath
                 : EditorUtility.OpenFilePanel("Pick sample_vr_frames.ndjson", "", "ndjson");
             if (string.IsNullOrEmpty(path)) return;

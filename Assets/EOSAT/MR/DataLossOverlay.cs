@@ -33,18 +33,30 @@ namespace Eosat.MR
         void Update()
         {
             bool lost = hub && hub.PredictionMode;
-            group.alpha = Mathf.MoveTowards(group.alpha, lost ? dimAlpha : 0f, Time.unscaledDeltaTime / Mathf.Max(0.01f, fadeSeconds));
+            // LOST (> 60 s, prediction frozen) dims a little harder than DELAYED / GHOST.
+            float target = !lost ? 0f : hub.State == DataState.Lost ? Mathf.Min(1f, dimAlpha + 0.1f) : dimAlpha;
+            group.alpha = Mathf.MoveTowards(group.alpha, target, Time.unscaledDeltaTime / Mathf.Max(0.01f, fadeSeconds));
             if (!lost || !message || Time.unscaledTime < nextText) return;
             nextText = Time.unscaledTime + 0.25f;
 
             float s = hub.SecondsSinceData;
-            float limit = spacecraft ? spacecraft.maxPredictionSec : 60f;
-            string state = s < limit
-                ? "Showing <b>predicted</b> position from the last known orbit and spin"
-                : "Prediction limit reached - position <b>frozen</b>";
-            message.text = "<size=54><color=#FFB000><b>PREDICTION MODE</b></color></size>\n" +
-                           $"Telemetry lost {s:0} s ago  ({hub.SourceLabel})\n{state}\n" +
-                           "<size=24>Reconnects automatically - or pick a source on the Connection screen</size>";
+            var st = hub.State;
+            string state = st == DataState.Lost
+                ? "Prediction limit reached - position <b>frozen</b> at the last estimate"
+                : "Showing <b>predicted</b> position from the last known orbit and spin";
+            message.text = LocalizationManager.Tr("<size=54><color=#FFB000><b>PREDICTION MODE</b></color></size>\n" +
+                           $"<color={StateColor(st)}><b>{st.ToString().ToUpperInvariant()}</b></color>   Telemetry lost {s:0} s ago  ({hub.SourceLabel})\n{state}\n" +
+                           "<size=24>Smooth 3 s re-join when data returns - reconnects automatically</size>");
         }
+
+        /// <summary>Data-state colours from the Deliverable D/E design (LIVE green, DELAYED orange, GHOST purple, LOST red).</summary>
+        public static string StateColor(DataState s) => s switch
+        {
+            DataState.Live => "#16A34A",
+            DataState.Delayed => "#EA8A0C",
+            DataState.Ghost => "#7C5CF0",
+            DataState.Lost => "#E11D48",
+            _ => "#9AA6B8"
+        };
     }
 }

@@ -16,6 +16,8 @@ namespace Eosat.MR
         public Button simulatedButton;
         public Button tcpButton;
         public Button webSocketButton;
+        [Tooltip("Optional: one drop-down (0 SIM, 1 TCP 8100, 2 WS 8101) instead of the three buttons - used on the VR wrist iPad.")]
+        public Dropdown sourceDropdown;
         public Color activeColor = new Color(0.2f, 0.75f, 1f, 1f);
         public Color idleColor = new Color(0.25f, 0.28f, 0.33f, 1f);
 
@@ -68,6 +70,7 @@ namespace Eosat.MR
             if (simulatedButton) simulatedButton.onClick.AddListener(SelectSimulated);
             if (tcpButton) tcpButton.onClick.AddListener(SelectTcp);
             if (webSocketButton) webSocketButton.onClick.AddListener(SelectWebSocket);
+            if (sourceDropdown) sourceDropdown.onValueChanged.AddListener(SelectIndex);
             if (hub) hub.SourceChanged += OnSourceChanged;
             nextRefresh = 0f;
         }
@@ -77,6 +80,7 @@ namespace Eosat.MR
             if (simulatedButton) simulatedButton.onClick.RemoveListener(SelectSimulated);
             if (tcpButton) tcpButton.onClick.RemoveListener(SelectTcp);
             if (webSocketButton) webSocketButton.onClick.RemoveListener(SelectWebSocket);
+            if (sourceDropdown) sourceDropdown.onValueChanged.RemoveListener(SelectIndex);
             if (hub) hub.SourceChanged -= OnSourceChanged;
         }
 
@@ -84,6 +88,7 @@ namespace Eosat.MR
         public void SelectSimulated() => Select(DataSource.SimulatedLocal);
         public void SelectTcp() => Select(DataSource.Tcp8100);
         public void SelectWebSocket() => Select(DataSource.WebSocket8101);
+        public void SelectIndex(int i) => Select((DataSource)Mathf.Clamp(i, 0, 2));
 
         public void Select(DataSource source)
         {
@@ -119,6 +124,7 @@ namespace Eosat.MR
             Tint(simulatedButton, hub.source == DataSource.SimulatedLocal);
             Tint(tcpButton, hub.source == DataSource.Tcp8100);
             Tint(webSocketButton, hub.source == DataSource.WebSocket8101);
+            if (sourceDropdown && sourceDropdown.value != (int)hub.source) sourceDropdown.SetValueWithoutNotify((int)hub.source);
         }
 
         void Tint(Button b, bool active)
@@ -128,6 +134,7 @@ namespace Eosat.MR
 
         static void SetText(Text t, ref string cache, string value)
         {
+            value = LocalizationManager.Tr(value);
             if (!t || cache == value) return;   // only touch the Text when it changes (no per-frame mesh rebuilds)
             cache = value;
             t.text = value;

@@ -31,7 +31,7 @@ namespace Eosat.MR
 
         public string AntennaStatus => Describe(AntennaDeployed, AntennaProgress) + Tag(AntennaManual);
         public string PanelsStatus =>
-            (deployables && Mathf.Abs(deployables.WingPyFraction - deployables.WingMyFraction) > 0.01f
+            (deployables && !deployables.singlePanel && Mathf.Abs(deployables.WingPyFraction - deployables.WingMyFraction) > 0.01f
                 ? $"+Y {deployables.WingPyFraction * 100f:0}%  -Y {deployables.WingMyFraction * 100f:0}%"
                 : Describe(PanelsDeployed, PanelsProgress)) + Tag(PanelsManual);
 
@@ -43,7 +43,18 @@ namespace Eosat.MR
         void Awake()
         {
             if (!deployables) deployables = GetComponentInChildren<DeployablesAnimator>();
+            // Main model missing (e.g. renamed in the scene): drive the mirrors instead of silently doing nothing.
+            if (!deployables && mirrors != null) deployables = System.Array.Find(mirrors, m => m);
+            if (!deployables) Debug.LogWarning("[EOSAT] SatelliteDeployControl has no DeployablesAnimator - antenna / panels will not animate.", this);
         }
+
+        // New source / data back after a loss: drop manual overrides so the next frame's states are applied.
+        void ResyncFromData(DataSource _ = default)
+        {
+            AntennaManual = PanelsManual = false;
+            lastDataAntenna = AntennaState.Unknown; lastDataPanels = -1;
+        }
+        void ResyncAfterLoss() => ResyncFromData();
 
         // Apply the same command to the main model and every mirror.
         void All(System.Action<DeployablesAnimator> act)
@@ -52,8 +63,17 @@ namespace Eosat.MR
             if (mirrors != null) foreach (var m in mirrors) if (m && m != deployables) act(m);
         }
 
-        void OnEnable() { if (hub) hub.SampleReceived += OnSample; }
-        void OnDisable() { if (hub) hub.SampleReceived -= OnSample; }
+        void OnEnable()
+        {
+            if (!hub) hub = FindAnyObjectByType<TelemetryHub>();   // unwired hub = deployables never follow the data
+            if (!hub) return;
+            hub.SampleReceived += OnSample; hub.SourceChanged += ResyncFromData; hub.DataRestored += ResyncAfterLoss;
+        }
+        void OnDisable()
+        {
+            if (!hub) return;
+            hub.SampleReceived -= OnSample; hub.SourceChanged -= ResyncFromData; hub.DataRestored -= ResyncAfterLoss;
+        }
 
         void Start()
         {

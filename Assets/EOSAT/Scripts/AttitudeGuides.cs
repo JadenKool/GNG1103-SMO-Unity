@@ -113,6 +113,8 @@ namespace Eosat
         {
             if (!spacecraft || !spacecraft.HasData) { SetVisible(false); return; }
             SetVisible(true);
+            // The "hide quaternion axes" toggle also hides the quaternion axis / angle arc / text.
+            quatAxisLine.enabled = quatArc.enabled = quatLabel.GetComponent<Renderer>().enabled = AxesToggle.Visible;
             Vector3 p = transform.position;
             double t = spacecraft.DisplayUnix;
             var cam = Camera.main;

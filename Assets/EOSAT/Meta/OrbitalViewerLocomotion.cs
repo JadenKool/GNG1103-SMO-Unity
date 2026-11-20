@@ -2,10 +2,20 @@
 // VR mode: the player sits on a sphere around a pivot and orbits it with the thumbsticks.
 // Put this on the PARENT of OVRCameraRig.
 //
-//   Right stick      : orbit freely in any direction, a full 360 degrees (no pitch / yaw limits)
-//   Left stick Y     : zoom (change the orbit radius; push up = closer)
+//   Left stick       : orbit the spacecraft freely, a full 360 degrees (radius clamped)
+//   Right stick Y    : zoom (change the orbit radius; push up = closer)
 //   A / X            : recentre (pivot straight ahead at eye level from where you now stand and face)
-//   Desktop testing  : arrow keys orbit, PageUp / PageDown zoom, T = switch target
+//   Both sticks and A / X are ignored while a controller ray hovers a UI panel (UiHoverNav drives the UI then).
+//   Desktop testing  : arrow keys orbit, PageUp / PageDown zoom, T = switch target, V = next viewpoint
+//
+// Viewpoints (SetViewMode, wrist iPad buttons):
+//   Free              - stick orbit (above)
+//   Earth-up, Earth   - Earth's north up, looking down past the spacecraft at the Earth
+//   Earth-up, Sun     - Earth's north up, looking past the spacecraft toward the Sun
+//   Body nadir        - spacecraft-fixed, looking along the body nadir axis (+Z body)
+//   Body solar panel  - spacecraft-fixed, looking at the solar panel face
+// The two spacecraft-fixed views turn with the spacecraft, so they are locked out (back to Free) while it
+// spins faster than tumbleLockDegPerSec.
 //
 // Camera target (ToggleTarget / SetFollowSatellite, wired to the VR console button):
 //   Follow Earth      - the pivot is the Earth's centre.
@@ -27,6 +37,19 @@ namespace Eosat.Meta
     public class OrbitalViewerLocomotion : MonoBehaviour
     {
         public enum Target { Earth, Satellite }
+        public enum ViewMode { Free, EarthUpLookEarth, EarthUpLookSun, BodyNadir, BodySolar }
+
+        [Header("Viewpoints")]
+        [SerializeField] Target startTarget = Target.Satellite;
+        [Tooltip("Spin rate source for the tumble lock. Auto-found on the satellite if empty.")]
+        [SerializeField] SpacecraftController spacecraft;
+        [Tooltip("Sun direction source. Auto-found under earthCenter if empty.")]
+        [SerializeField] EarthController earth;
+        [Tooltip("Spacecraft-fixed views are disabled above this spin rate (deg/s).")]
+        [SerializeField] float tumbleLockDegPerSec = 10f;
+        [Tooltip("Solar panel face normal in the spacecraft's local axes (Unity: x = body X, y = body Z / nadir, z = body Y). Default: zenith face.")]
+        [SerializeField] Vector3 solarPanelNormalLocal = Vector3.down;
+        [SerializeField] Key desktopViewKey = Key.V;
 
         [Header("References")]
         [Tooltip("Centre of the Earth.")]
@@ -79,6 +102,49 @@ namespace Eosat.Meta
         public Quaternion Orbit { get; private set; } = Quaternion.identity;
         public Transform Head => head;
         public event Action<Target> TargetChanged;
+        public ViewMode Mode { get; private set; } = ViewMode.Free;
+        public event Action<ViewMode> ViewModeChanged;
+        /// <summary>Spacecraft spinning too fast for the spacecraft-fixed views.</summary>
+        public bool BodyViewsLocked => spacecraft && spacecraft.VisualSpinDegPerSec > tumbleLockDegPerSec;
+        static bool IsBodyMode(ViewMode m) => m == ViewMode.BodyNadir || m == ViewMode.BodySolar;
+
+        /// <summary>UI buttons (int for UnityEvent wiring): 0 Free, 1 Earth-up look Earth, 2 Earth-up look Sun, 3 body nadir, 4 body solar.</summary>
+        public void SetViewMode(int mode) => SetViewMode((ViewMode)Mathf.Clamp(mode, 0, 4));
+
+        public void SetViewMode(ViewMode mode)
+        {
+            if (IsBodyMode(mode) && BodyViewsLocked)
+            {
+                Debug.Log($"[OrbitalViewerLocomotion] Tumble lock: spin {spacecraft.VisualSpinDegPerSec:0} deg/s > {tumbleLockDegPerSec:0} - spacecraft-fixed view refused.");
+                return;
+            }
+            if (mode != ViewMode.Free && !satellite) return;
+            if (mode != ViewMode.Free) SetTarget(Target.Satellite);
+            if (mode == ViewMode.Free && Mode != ViewMode.Free) targetOrbit = Orbit;   // continue from where the fixed view was
+            Mode = mode;
+            ViewModeChanged?.Invoke(mode);
+        }
+
+        // Rotation that looks from the eye toward the satellite for the fixed viewpoints.
+        Quaternion FixedOrbit()
+        {
+            Vector3 north = earthCenter ? earthCenter.up : Vector3.up;
+            Vector3 fwd, up;
+            switch (Mode)
+            {
+                case ViewMode.EarthUpLookEarth:
+                    fwd = earthCenter ? earthCenter.position - satellite.position : Vector3.down; up = north; break;
+                case ViewMode.EarthUpLookSun:
+                    Vector3 sun = earth ? earth.SunDirUnity : Vector3.right;
+                    fwd = earthCenter ? earthCenter.TransformDirection(sun) : sun; up = north; break;
+                case ViewMode.BodyNadir:
+                    fwd = satellite.rotation * Vector3.up; up = satellite.rotation * Vector3.forward; break;
+                default:
+                    fwd = -(satellite.rotation * solarPanelNormalLocal); up = satellite.rotation * Vector3.forward; break;
+            }
+            if (Vector3.Cross(fwd.normalized, up.normalized).sqrMagnitude < 1e-3f) up = satellite.rotation * Vector3.right;
+            return Quaternion.LookRotation(fwd, up);
+        }
 
         Quaternion targetOrbit = Quaternion.identity;
         float targetRadius;
@@ -106,6 +172,9 @@ namespace Eosat.Meta
             roomRot = transform.rotation;
             earthRadiusSaved = earthStartRadius;
             satelliteRadiusSaved = satelliteStartRadius;
+            if (!spacecraft && satellite) spacecraft = satellite.GetComponent<SpacecraftController>();
+            if (!earth && earthCenter) earth = earthCenter.GetComponentInChildren<EarthController>();
+            if (startTarget == Target.Satellite && satellite) CurrentTarget = Target.Satellite;
             ResetView();
         }
 
@@ -145,6 +214,7 @@ namespace Eosat.Meta
         {
             if (FollowingSatellite) satelliteRadiusSaved = targetRadius; else earthRadiusSaved = targetRadius;
             CurrentTarget = target;
+            if (target == Target.Earth && Mode != ViewMode.Free) { Mode = ViewMode.Free; ViewModeChanged?.Invoke(Mode); }
             // This runs behind the fade, so the view can be re-aimed without a visible lurch.
             if (FollowingSatellite && earthCenter)
             {
@@ -176,8 +246,10 @@ namespace Eosat.Meta
             if (needsCapture) { if (!HeadReady) return; CaptureAnchor(); }
 
             float dt = Time.deltaTime;
-            Vector2 orbit = DeadZone(OVRInput.Get(OVRInput.Axis2D.SecondaryThumbstick, OVRInput.Controller.Touch));
-            float zoom = DeadZone(new Vector2(0f, OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.Touch).y)).y;
+            // Left (primary) stick orbits, right (secondary) stick Y zooms; both paused while a ray is on a UI panel.
+            bool onUi = UiHoverNav.Hovering;
+            Vector2 orbit = onUi ? Vector2.zero : DeadZone(OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.Touch));
+            float zoom = onUi ? 0f : DeadZone(new Vector2(0f, OVRInput.Get(OVRInput.Axis2D.SecondaryThumbstick, OVRInput.Controller.Touch).y)).y;
 
             var kb = Keyboard.current;
             if (kb != null)
@@ -189,9 +261,17 @@ namespace Eosat.Meta
                 if (kb.pageUpKey.isPressed) zoom += 1f;
                 if (kb.pageDownKey.isPressed) zoom -= 1f;
                 if (kb[desktopTargetKey].wasPressedThisFrame) ToggleTarget();
+                if (kb[desktopViewKey].wasPressedThisFrame) SetViewMode(((int)Mode + 1) % 5);
             }
-            if (OVRInput.GetDown(recenterButton, OVRInput.Controller.Touch) || OVRInput.GetDown(alternateButton, OVRInput.Controller.Touch))
+            if (!onUi && (OVRInput.GetDown(recenterButton, OVRInput.Controller.Touch) || OVRInput.GetDown(alternateButton, OVRInput.Controller.Touch)))
                 CaptureAnchor();
+
+            // Fixed viewpoints: the stick no longer orbits (zoom still works). Tumble lock drops back to Free.
+            if (Mode != ViewMode.Free)
+            {
+                if (IsBodyMode(Mode) && BodyViewsLocked) SetViewMode(ViewMode.Free);
+                else { targetOrbit = FixedOrbit(); orbit = Vector2.zero; }
+            }
 
             // Slower angular speed when close, so the surface doesn't whip past.
             float height = Mathf.Max(0.05f, targetRadius - SurfaceRadius);

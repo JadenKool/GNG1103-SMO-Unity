@@ -42,7 +42,7 @@ To test the network path now: `python Tools/telemetry_test_server.py` (options: 
 | 2 | Quaternion attitude on 10x23x37 cm model | `SpacecraftController` converts body-to-ECI quaternion; placeholder box is 10x23x37 cm |
 | 3-4 | Body axes and frames of reference | Labelled X/Y/Z body axes on the spacecraft, ECI axes through Earth, yellow Sun vector |
 | 5 | Smooth, no jumps, spin warning | Interpolation between 1 Hz samples at full frame rate; spin limited to 45 deg/s, warning above 30 deg/s |
-| 6 | Stalled / bad data | Rejects malformed packets; after 3 s of silence the screen dims slowly, motion is extrapolated up to 60 s, then re-joins smoothly |
+| 6 | Stalled / bad data | Rejects malformed packets; screens dim below 1 Hz, above 60 % dropouts in 20 s or after 7 s of silence; the orbit keeps propagating, then re-joins smoothly |
 | 7-8 | Panels / antenna state | Animated (30 s panel deploy, antenna stowed/deployed/jammed) with text labels |
 | 9 | Eclipse / sunlight | From telemetry if sent, otherwise cylindrical Earth-shadow check |
 | 10 | Recognisable Earth, day/night | Textured Earth rotated by Greenwich sidereal time; custom day/night shader with city lights |
@@ -71,24 +71,57 @@ Everything below is built by **EOSAT > Build Combined Scene (MR tabletop + VR or
 
 **4. Data + deployables**
 - `Systems/Deployables Control`: Deployables = MR model, Mirrors = VR spacecraft, Hub = Telemetry. A missing hub or animator is found or warned about at runtime. Manual overrides clear on a source switch or when data returns.
-- Data states (Deliverable D/E): **LIVE** < 2 s, **DELAYED** 2–5 s, **GHOST** > 5 s, **LOST** > 60 s (`TelemetryHub.State`). The PREDICTION MODE veil fades in after 3 s (`Stale After Seconds`) on every screen and the iPad, and dims harder at LOST. The satellite keeps moving on its last orbit and spin for 60 s (`SpacecraftController > Max Prediction Sec`), then re-joins the real position over 3 s with smoothstep + Slerp (`Catch Up Duration Sec`).
+- Data states: **LIVE** / **DELAYED** / **GHOST** / **LOST** (`TelemetryHub.State`). The PREDICTION MODE veil follows `TelemetryHub.Degraded` (below 1 Hz, more than 60 % dropouts in 20 s, or 7 s silent). The orbit keeps propagating meanwhile (`SpacecraftController > Max Prediction Sec` 5400 s, attitude capped at 60 s), then re-joins smoothly.
 - Tabletop overlay: ALT and VEL come from the received frames (same as the Telemetry screen). The orbit path only shows while the replay file is the live source. The status line shows the data state.
 
 ## Nov 11 features: setup steps
 
 The builder does all of this too. These are the manual steps, or what to check after a rebuild.
 
-**Loading screen (60 s startup buffer)**
-1. `Telemetry` object > `TelemetryHub`: set **Startup Buffer Seconds** to `60`, **History Seconds** to `60`. `0` turns the buffer off and the loading screen hides itself.
-2. Under `CenterEyeAnchor` add a world-space Canvas (`Loading Screen`), local position (0, 0, 1.2), scale 0.0009, size 1000 × 420. Add **CanvasGroup** and **TelemetryLoadingScreen**.
-3. Children: a Text (status) and an Image with Source Image `UISprite`, **Image Type = Filled, Fill Method = Horizontal** (progress bar).
-4. On `TelemetryLoadingScreen` drag in Hub, Progress Fill and Status Text.
-While buffering, the hub caches frames but does not send them to the scene. At 60 s it sends the latest frame and the loading screen fades out. `TelemetryHub.History` holds the rolling last 60 s.
+## Nov 20 update (telemetry links, commands, flight map, VR views, replay)
 
-**Single solar panel**
-1. On each `DeployablesAnimator` (MR model and VR spacecraft) tick **Single Panel**.
-2. Disable or delete the left wing GameObject (`panelHingeLeft`). Keep `panelHingeRight` (+Y) as the only panel hinge.
-3. `PanelFraction`, the iPad "Solar Panels" toggle and the data table now track that one panel. The status text no longer splits "+Y / −Y".
+Rebuild with **EOSAT > Build Combined Scene**, then run **EOSAT > Run Self-Tests**.
+
+**Telemetry links**: there is no loading screen. The scene starts live. `TelemetryHub` keeps at most 7 s of frames (`MaxBufferSeconds`), only for smoothing. Between packets the spacecraft is extrapolated every frame.
+- 8101: live simulation over WebSocket. The default is `wss://ops.cgo.live/VR`. In the address field you can also type an IP, `IP/VR` or a `ws(s)://` URL. The Connection screen and iPad have **OPS SERVER** and **/VR** buttons.
+- 8103: power stream (battery, temperatures, bus voltage, generated / consumed, panel power, face currents, load shed). It goes to the same host and path on port 8103 (`Power Uri Override` changes that). It is parsed generically (`FlatJson` → `PowerSample`, fields found by name).
+- 8104: command back-channel, same host and path (`Command Uri Override`). It carries `{"type":"command","command":"DEPLOY_PANEL_A", "approval":"FLIGHT_COMMANDER", ...}`.
+- Catch system: the screens dim if the rate drops below 1 Hz, if more than 60 % of the last 20 s is missing, or after 7 s with no data. The orbit keeps propagating meanwhile. `TelemetryHub.Degraded` / `DegradedReason` hold the state.
+
+**Deployables and commands**: Panel A (right hinge, wing +Y) and Panel B (left hinge, wing −Y) each go 0–90° from their telemetry fraction. A panel that stops between 2 % and 98 % for 10 s shows **STUCK** and leaves a replay marker. The panel rotation angle is ignored. The antenna is a binary half-wave dipole: stowed or deployed.
+- The DEPLOY buttons (PANEL A, PANEL B, PANELS A + B, ANTENNA) never move the model. They send the command on 8104, and the banner at the top of the view says it is queued to the Flight Commander. The model moves, and the banner turns green ("executed"), only when telemetry shows the deployment.
+
+**Live vs Replay**: live panels show only lat / lon / alt, deployments, battery / temperature and link / command status. **REPLAY** (Data Table button or iPad toggle) opens a head-locked panel on the right. It lists all telemetry: raw ECI, quaternion, every power field and the command / anomaly log. Below the list is a timeline with blue markers for rejects, gaps, stuck panels and a jammed antenna. Click a marker to jump to it. **LIVE** returns to the live feed.
+
+**VR camera** (`OrbitalViewerLocomotion`): the left stick orbits the spacecraft, the right stick zooms. Both stop while a ray is on a panel. The iPad **VIEWPOINT** buttons:
+- FREE
+- EARTH: north up, looking at Earth
+- SUN: north up, looking at the Sun
+- NADIR: spacecraft-fixed
+- PANEL: spacecraft-fixed, looking at the solar panel
+
+NADIR and PANEL lock out above 10°/s spin (tumble lock). Set the solar panel face with `Solar Panel Normal Local`; the default is the zenith face, which is an assumption to check against the CAD.
+
+**VR scene**:
+- The Earth is translucent (`EarthDayNight` `_Alpha` 0.8, on a material copy; the MR globe stays solid).
+- The next-orbit ground track is drawn on the Earth: yellow sunlit, violet eclipse, cyan station pass.
+- A green Earth-centre vector sits next to the yellow Sun vector.
+- The body axes are shown by default. The iPad toggle "Quaternion axes" hides them (`AxesToggle`).
+
+**MR**:
+- The globe is 84 cm across, and grab-rotation gain is 2.6.
+- Fonts are larger: screens are 1.05 mm/px, the iPad is 0.33 m wide.
+- When a ray hovers a panel (`UiHoverNav`): stick flicks move between buttons, up / down on the IP field steps the selected octet, A / X clicks, and holding the stick scrolls the replay list.
+
+**Flight Map** (1.2 m wide screen):
+- Time: date, UTC clock, MET, sim / rate chips.
+- Next passes: in contact or LOS-in countdown, plus a station table with AOS / LOS / max elevation.
+- Link box.
+- Ground track: the next orbit (94.5 min) solid and later orbits dotted, with markers for INUVIK / IQALUIT / SVALBARD / O'HIGGINS / TROLL and AOS callouts.
+- Plan strip: the next orbit, then 24 h with contacts / activities / eclipse.
+- Budgets.
+
+Passes and eclipses come from `OrbitPredictor`: circular propagation of the observed orbit, refreshed every 20 s. Budgets the stream does not provide (data fill, activity plan) show "no MCS URL configured" instead of invented numbers.
 
 **Quaternion axis visualizer**
 1. Under the satellite model (the object `SpacecraftController` rotates), add an empty child `Body Axes`, position 0, rotation 0.
@@ -97,7 +130,7 @@ While buffering, the hub caches frames but does not send them to the scene. At 6
 
 **Antenna deployment %**: the feed may send `"antenna": {"fraction": 0.45}` or `{"percent": 45}`. If it does, the bar under the telemetry readout shows it. If it doesn't, it shows the animated state with "(state)". `TelemetryReadoutUI` has the Antenna Fill (filled Image) and Antenna Text fields.
 
-**Data table**: `Screen - Data Table` (MR) > `DataTableUI` with Keys / Values Text. Refresh Hz is 1. Errors show red and warnings orange.
+**Data table**: `Screen - Data Table` (MR) > `DataTableUI` with Keys / Values Text. Refresh Hz is 1. Errors show red and warnings orange. **Show Raw** (on only in the Replay panel) adds ECI, quaternions, all power fields and the command log.
 
 **EN / FR**: there is a "FRANÇAIS" toggle (`LanguageToggle`) on the Connection screen and the iPad. Code-set text goes through `LocalizationManager.Tr()`. Static labels have `LocalizedText`. Add new translations to `LocalizationManager.Fr` (English phrase → French). The choice is saved in PlayerPrefs.
 

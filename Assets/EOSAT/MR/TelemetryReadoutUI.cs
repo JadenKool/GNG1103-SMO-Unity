@@ -49,19 +49,34 @@ namespace Eosat.MR
         void Update()
         {
             UpdateAntennaBar();
-            if (!dirty || !dataText || Time.unscaledTime < nextRefresh) return;
+            // Refresh on new samples, and at least once a second so link / power status updates when data stops.
+            if (!dataText || Time.unscaledTime < nextRefresh || (!dirty && Time.unscaledTime < nextRefresh + 1f)) return;
             nextRefresh = Time.unscaledTime + 1f / refreshHz;
             dirty = false;
 
             if (last == null) { dataText.text = LocalizationManager.Tr("Waiting for telemetry..."); return; }
 
+            // Glanceable only: no raw XYZ / quaternions on the live HUD (those live in the Replay panel).
             float earthR = last.earthRadiusKm > 0f ? last.earthRadiusKm : (float)EciMath.EarthRadiusKm;
+            Vector2 ll = OrbitPredictor.LatLon(EciMath.EciToUnity(last.posEciKm), last.unixTime);
             sb.Clear();
-            sb.Append("ALT   ").Append((last.posEciKm.magnitude - earthR).ToString("0.0")).Append(" km\n");
-            sb.Append("VEL   ").Append(float.IsNaN(velocityKmS) ? "--" : velocityKmS.ToString("0.00") + " km/s").Append('\n');
-            sb.Append("SUN   ").Append(!last.hasEclipse ? "--" : last.eclipse ? "<color=#FFB000>ECLIPSE</color>" : "SUNLIT").Append('\n');
-            sb.Append("MODE  ").Append(Or(last.scMode)).Append("   AOCS ").Append(Or(last.aocsMode)).Append('\n');
-            sb.Append("POINT ").Append(Or(last.pointing)).Append("   ").Append(Or(last.phase));
+            sb.Append("LAT ").Append(ll.x.ToString("0.0")).Append("°  LON ").Append(ll.y.ToString("0.0")).Append("°\n");
+            sb.Append("ALT ").Append((last.posEciKm.magnitude - earthR).ToString("0")).Append(" km   ")
+              .Append(float.IsNaN(velocityKmS) ? "" : velocityKmS.ToString("0.00") + " km/s   ")
+              .Append(!last.hasEclipse ? "" : last.eclipse ? "<color=#FFB000>ECLIPSE</color>" : "SUNLIT").Append('\n');
+            if (deploy && deploy.deployables)
+            {
+                var d = deploy.deployables;
+                sb.Append("PANEL A ").Append(d.PanelAAngleDeg.ToString("0")).Append('°');
+                if (!d.singlePanel) sb.Append("   B ").Append(d.PanelBAngleDeg.ToString("0")).Append('°');
+                if (deploy.PanelAStuck || deploy.PanelBStuck) sb.Append("  <color=#FF6A6A>STUCK</color>");
+                sb.Append('\n');
+            }
+            var p = hub ? hub.LatestPower : null;
+            if (p != null)
+                sb.Append("BATT ").Append(F(p.BatterySocPct, "0")).Append("%   TEMP ").Append(F(p.TemperatureC, "0.0")).Append(" °C\n");
+            sb.Append("LINK ").Append(hub && hub.ReceivingData ? "<color=#39FF6A>LIVE</color>" : "<color=#FFB000>NO DATA</color>")
+              .Append(hub && hub.IsNetworkSource ? (hub.CommandLinkConnected ? "   CMD <color=#39FF6A>UP</color>" : "   CMD <color=#FF6A6A>DOWN</color>") : "");
             if (last.inContact) sb.Append("\n<color=green>CONTACT</color> ").Append(Or(last.groundStation));
             dataText.text = LocalizationManager.Tr(sb.ToString());
         }
@@ -70,15 +85,18 @@ namespace Eosat.MR
         void UpdateAntennaBar()
         {
             if (!antennaFill && !antennaText) return;
-            // Feed's own percentage when it sends one (last != null means the startup buffer is over), else the animated model.
-            bool fromFeed = last != null && last.hasAntennaFraction;
-            float pct = fromFeed ? hub.AntennaPercent : deploy ? deploy.AntennaProgress * 100f : hub ? hub.AntennaPercent : -1f;
+            // The half-wave dipole is binary: stowed or deployed (jammed shows red).
+            bool jammed = deploy && deploy.deployables && deploy.deployables.Antenna == AntennaState.Jammed;
+            float pct = deploy ? (deploy.AntennaDeployed ? 100f : 0f) : hub ? hub.AntennaPercent : -1f;
+            if (jammed) pct = -3f;
             if (Mathf.Abs(pct - shownPct) < 0.5f) return;
             shownPct = pct;
             if (antennaFill) antennaFill.fillAmount = Mathf.Clamp01(pct / 100f);
-            if (antennaText) antennaText.text = LocalizationManager.Tr(pct < 0f ? "ANTENNA  --" : $"ANTENNA  {pct:0}%" + (fromFeed ? "" : "  <size=18><color=#9AA6B8>(state)</color></size>"));
+            if (antennaText) antennaText.text = LocalizationManager.Tr(
+                jammed ? "ANTENNA  <color=#FF6A6A>JAMMED</color>" : pct < 0f ? "ANTENNA  --" : pct >= 99f ? "ANTENNA  DEPLOYED" : "ANTENNA  STOWED");
         }
 
         static string Or(string s) => string.IsNullOrEmpty(s) ? "--" : s;
+        static string F(float f, string fmt) => float.IsNaN(f) ? "--" : f.ToString(fmt);
     }
 }

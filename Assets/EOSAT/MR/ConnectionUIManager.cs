@@ -33,7 +33,7 @@ namespace Eosat.MR
         [Tooltip("Type with a keyboard, or use the on-screen keypad (KeypadPress).")]
         public InputField hostField;
         public Text hostStatus;
-        public int maxHostLength = 21;      // 255.255.255.255:8101
+        public int maxHostLength = 48;      // wss://255.255.255.255:8101/some/path
 
         float nextRefresh;
         string lastStatus, lastDetail;
@@ -53,15 +53,17 @@ namespace Eosat.MR
         public void KeypadBackspace() { if (hostField && hostField.text.Length > 0) hostField.text = hostField.text.Substring(0, hostField.text.Length - 1); }
         public void KeypadClear() { if (hostField) hostField.text = ""; }
         public void UseLocalhost() { if (hostField) hostField.text = "127.0.0.1"; ApplyCustomHost(); }
+        /// <summary>Client's ops server (live simulation over secure WebSocket), then switch to WS.</summary>
+        public void UseOpsServer() { if (hostField) hostField.text = "wss://ops.cgo.live/VR"; ApplyCustomHost(); Select(DataSource.WebSocket8101); }
 
-        /// <summary>"Set IP" button: point TCP + WebSocket at the typed address.</summary>
+        /// <summary>"Set IP" button: point TCP + WebSocket (and the 8103 power / 8104 command links) at the typed address.</summary>
         public void ApplyCustomHost()
         {
             if (!hub || !hostField) return;
             bool ok = hub.SetCustomHost(hostField.text);
-            if (hostStatus) hostStatus.text = ok
-                ? $"<color={connectedColor}>Address set: {hub.host}</color>  (TCP {hub.port}, WebSocket 8101). Now press TCP or WS."
-                : "<color=#FF6A6A>" + hub.LastHostError + "</color>";
+            if (hostStatus) hostStatus.text = LocalizationManager.Tr(ok
+                ? $"<color={connectedColor}>Address set: {hub.host}</color>  (WS {hub.webSocketUri}, power {TelemetryHub.PowerPort}, commands {TelemetryHub.CommandPort}). Now press TCP or WS."
+                : "<color=#FF6A6A>" + hub.LastHostError + "</color>");
             nextRefresh = 0f;
         }
 

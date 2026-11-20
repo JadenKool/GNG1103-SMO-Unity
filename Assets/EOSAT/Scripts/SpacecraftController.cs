@@ -23,8 +23,10 @@ namespace Eosat
 
         [Header("Data loss handling")]
         public float stallTimeoutSec = 3f;
-        [Tooltip("Max time to keep predicting motion after the last packet (target spec: tolerate up to 60 s lag).")]
-        public float maxPredictionSec = 60f;
+        [Tooltip("Max time to keep propagating the orbit after the last packet (continues from the last known trajectory).")]
+        public float maxPredictionSec = 5400f;   // keep propagating the orbit through a whole ~94 min gap between passes
+        [Tooltip("Attitude is extrapolated from the last spin rate for at most this long, then held.")]
+        public float maxAttitudePredictionSec = 60f;
         [Tooltip("If the new sample is this far (units) from where the model is, blend over catchUpDurationSec instead of 1 s.")]
         public float catchUpDistanceUnits = 0.3f;
         public float catchUpDurationSec = 3f;
@@ -48,6 +50,11 @@ namespace Eosat
         public float PhysicalSpinDegPerSec { get; private set; }
         public bool SpinWarning => VisualSpinDegPerSec > spinWarningDegPerSec;
         public bool InEclipse { get; private set; }
+        /// <summary>Orbit pole (Unity axes) and angular rate from the last two samples: used by OrbitPredictor.</summary>
+        public Vector3 OrbitAxis => posAxis;
+        public float OrbitRateDegPerSec => timeRate > 1e-3f ? posRateDeg / timeRate : posRateDeg;   // per SIM second
+        /// <summary>Simulator seconds per real second (Training x1, x10...).</summary>
+        public float TimeRate => timeRate;
 
         TelemetrySample latest;
         Vector3 startPos, endPos, dispPos;
@@ -67,8 +74,10 @@ namespace Eosat
         // Re-enabled after being switched off (MR <-> VR): the stored pose is stale. Hold it and SNAP to the next
         // sample instead of gliding/extrapolating from the old one (that smeared trails and the flight map).
         bool resnap;
-        void OnEnable() { if (hub) hub.SampleReceived += OnSample; if (HasData) resnap = true; }
-        void OnDisable() { if (hub) hub.SampleReceived -= OnSample; }
+        void OnEnable() { if (hub) { hub.SampleReceived += OnSample; hub.Resynced += Resnap; } if (HasData) resnap = true; }
+        void OnDisable() { if (hub) { hub.SampleReceived -= OnSample; hub.Resynced -= Resnap; } }
+        /// <summary>Snap to the next sample (replay scrub, back to live) instead of gliding to it.</summary>
+        public void Resnap() { if (HasData) resnap = true; }
 
         void OnSample(TelemetrySample s)
         {
@@ -150,7 +159,7 @@ namespace Eosat
             {
                 float extra = Mathf.Min(now - segStart - segDur, maxPredictionSec);
                 p = Quaternion.AngleAxis(posRateDeg * extra, posAxis) * endPos;
-                r = Quaternion.AngleAxis(rotRateDeg * extra, rotAxis) * endRot;
+                r = Quaternion.AngleAxis(rotRateDeg * Mathf.Min(extra, maxAttitudePredictionSec), rotAxis) * endRot;
                 t = endT + timeRate * extra;
                 Predicting = SecondsSinceData > segDur * 1.5f;
             }

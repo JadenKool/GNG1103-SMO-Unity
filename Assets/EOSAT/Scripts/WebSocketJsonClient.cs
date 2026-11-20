@@ -50,6 +50,25 @@ namespace Eosat
 
         public bool TryDequeue(out string json) => messages.TryDequeue(out json);
 
+        readonly SemaphoreSlim sendLock = new SemaphoreSlim(1, 1);   // ClientWebSocket allows one send at a time
+
+        /// <summary>Sends one text message in the background (command back-channel). False if the socket is not open.</summary>
+        public bool Send(string text)
+        {
+            ClientWebSocket s; CancellationToken token;
+            lock (gate) { s = socket; if (cts == null) return false; token = cts.Token; }
+            if (s == null || s.State != WebSocketState.Open) return false;
+            var bytes = new ArraySegment<byte>(Encoding.UTF8.GetBytes(text));
+            Task.Run(async () =>
+            {
+                await sendLock.WaitAsync(token).ConfigureAwait(false);
+                try { await s.SendAsync(bytes, WebSocketMessageType.Text, true, token).ConfigureAwait(false); }
+                catch (Exception e) { lastError = "send failed: " + e.Message; }
+                finally { sendLock.Release(); }
+            }, token);
+            return true;
+        }
+
         /// <summary>Stops the loop, closes the socket politely (1 s max) and frees everything. Safe to call twice.</summary>
         public void Disconnect()
         {

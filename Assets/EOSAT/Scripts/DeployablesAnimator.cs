@@ -3,29 +3,29 @@ using UnityEngine;
 namespace Eosat
 {
     /// <summary>
-    /// Animates solar panel wings and the antenna between stowed / deployed / jammed.
-    /// Two ways to drive the wings:
-    ///  - SetTargets(state): both wings animate together over panelDeploySeconds (manual buttons, legacy feed).
-    ///  - SetWingFractions(py, my): each wing follows the simulator's own deploy fraction (client smo-vr/1 feed).
+    /// Animates the two spring-loaded solar panels (Panel A = +Y wing, Panel B = -Y wing) and the antenna.
+    ///  - SetWingFractions(a, b): each panel's hinge angle (0-90 deg) follows the telemetry deployment fraction,
+    ///    so a panel stuck at a partial angle is visibly stuck. The feed's panel rotation angle is never used.
+    ///  - SetTargets(state): legacy feeds with only "deployed / stowed": both panels animate over panelDeploySeconds.
+    ///  - Antenna: a half-wave dipole stick that pops out - binary deployed / not deployed (jammed = not deployed, red).
+    /// Nothing here is driven by the UI: commands go to the Flight Commander and the model moves only on telemetry.
     /// </summary>
     public class DeployablesAnimator : MonoBehaviour
     {
-        [Tooltip("Right hinge = +Y wing, Left hinge = -Y wing.")]
+        [Tooltip("Right hinge = Panel A (+Y wing), Left hinge = Panel B (-Y wing).")]
         public Transform panelHingeLeft, panelHingeRight, antennaHinge;
-        [Tooltip("Single solar panel model: only Panel Hinge Right animates (follows the +Y wing data); Panel Hinge Left is ignored and can be empty.")]
+        [Tooltip("Single solar panel model: only Panel Hinge Right animates (follows Panel A); Panel Hinge Left is ignored and can be empty.")]
         public bool singlePanel;
         public Renderer antennaRenderer;
 
-        [Tooltip("Target spec: 30 s solar panel deployment animation.")]
+        [Tooltip("Legacy state-only feeds: panel deployment animation time.")]
         public float panelDeploySeconds = 30f;
-        public float antennaDeploySeconds = 5f;
-        [Tooltip("Panel animation time when a toggle is pressed by hand (the 30 s spec applies to telemetry-driven deployment).")]
-        public float manualPanelSeconds = 4f;
+        [Tooltip("Spring pop of the antenna (binary state, so this is only a short transition).")]
+        public float antennaDeploySeconds = 0.25f;
         [Tooltip("How quickly a wing catches up to the simulator's fraction (1/s). Higher = tighter follow.")]
         public float wingFollowRate = 4f;
         public float panelStowedAngle = 90f;
         public float antennaStowedAngle = 90f;
-        [Range(0f, 1f)] public float antennaJammedFraction = 0.4f;
         public Color antennaColor = new Color(0.85f, 0.85f, 0.85f);
         public Color antennaJammedColor = new Color(1f, 0.25f, 0.2f);
 
@@ -39,7 +39,11 @@ namespace Eosat
                                     || (dataWings && (InBetween(pyTarget) || InBetween(myTarget)));
         public bool AntennaMoving => !Mathf.Approximately(AntennaFraction, AntennaTarget);
 
-        float AntennaTarget => Antenna == AntennaState.Deployed ? 1f : Antenna == AntennaState.Jammed ? antennaJammedFraction : 0f;
+        /// <summary>Hinge angle shown for each panel, degrees from stowed (0) to fully open (90).</summary>
+        public float PanelAAngleDeg => WingPyFraction * panelStowedAngle;
+        public float PanelBAngleDeg => WingMyFraction * panelStowedAngle;
+
+        float AntennaTarget => Antenna == AntennaState.Deployed ? 1f : 0f;   // binary: jammed = not deployed
 
         bool dataWings;              // true while the simulator is giving per-wing fractions
         float pyTarget, myTarget;
@@ -49,20 +53,10 @@ namespace Eosat
 
         static bool InBetween(float f) => f > 0.001f && f < 0.999f;
 
-        float activePanelSeconds = -1f;
-
-        /// <summary>Manual toggle: same as SetTargets but the panels animate in manualPanelSeconds.</summary>
-        public void SetTargetsManual(PanelState panels, AntennaState antenna)
-        {
-            SetTargets(panels, antenna);
-            if (panels != PanelState.Unknown) activePanelSeconds = manualPanelSeconds;
-        }
-
         public void SetTargets(PanelState panels, AntennaState antenna)
         {
             if (panels != PanelState.Unknown)
             {
-                activePanelSeconds = panelDeploySeconds;
                 Panels = panels;
                 dataWings = false;
                 pyTarget = myTarget = panels == PanelState.Deployed ? 1f : 0f;
@@ -89,7 +83,7 @@ namespace Eosat
             }
             else
             {
-                float step = Time.deltaTime / Mathf.Max(0.01f, activePanelSeconds > 0f ? activePanelSeconds : panelDeploySeconds);
+                float step = Time.deltaTime / Mathf.Max(0.01f, panelDeploySeconds);
                 WingPyFraction = Mathf.MoveTowards(WingPyFraction, pyTarget, step);
                 WingMyFraction = Mathf.MoveTowards(WingMyFraction, myTarget, step);
             }

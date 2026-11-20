@@ -97,7 +97,7 @@ namespace Eosat.MR
                 if (arVrToggle) arVrToggle.SetIsOnWithoutNotify(switcher.IsMR);
                 SetLabel(arVrStatus, switcher.IsMR
                     ? (switcher.PassthroughRunning ? "MR TABLETOP  |  sticks zoom, A / X recentre" : "MR TABLETOP  |  no passthrough (grey)")
-                    : "VR ORBIT  |  R stick orbit, L stick zoom");
+                    : "VR ORBIT  |  L stick orbit, R stick zoom");
             }
             else if (metaPassthrough)
             {

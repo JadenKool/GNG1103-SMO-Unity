@@ -32,20 +32,18 @@ namespace Eosat.MR
 
         void Update()
         {
-            bool lost = hub && hub.PredictionMode;
-            // LOST (> 60 s, prediction frozen) dims a little harder than DELAYED / GHOST.
+            // Catch system: < 1 Hz, > 60 % dropouts in 20 s, or > 7 s without data -> dim for comfort.
+            bool lost = hub && hub.Degraded;
+            // LOST (> 60 s) dims a little harder than DELAYED / GHOST.
             float target = !lost ? 0f : hub.State == DataState.Lost ? Mathf.Min(1f, dimAlpha + 0.1f) : dimAlpha;
             group.alpha = Mathf.MoveTowards(group.alpha, target, Time.unscaledDeltaTime / Mathf.Max(0.01f, fadeSeconds));
             if (!lost || !message || Time.unscaledTime < nextText) return;
             nextText = Time.unscaledTime + 0.25f;
 
-            float s = hub.SecondsSinceData;
             var st = hub.State;
-            string state = st == DataState.Lost
-                ? "Prediction limit reached - position <b>frozen</b> at the last estimate"
-                : "Showing <b>predicted</b> position from the last known orbit and spin";
             message.text = LocalizationManager.Tr("<size=54><color=#FFB000><b>PREDICTION MODE</b></color></size>\n" +
-                           $"<color={StateColor(st)}><b>{st.ToString().ToUpperInvariant()}</b></color>   Telemetry lost {s:0} s ago  ({hub.SourceLabel})\n{state}\n" +
+                           $"<color={StateColor(st)}><b>{st.ToString().ToUpperInvariant()}</b></color>   {hub.DegradedReason}  ({hub.SourceLabel})\n" +
+                           "Showing <b>predicted</b> position from the last known orbit and spin\n" +
                            "<size=24>Smooth 3 s re-join when data returns - reconnects automatically</size>");
         }
 

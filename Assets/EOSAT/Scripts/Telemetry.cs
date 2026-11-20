@@ -29,6 +29,117 @@ namespace Eosat
         public bool inContact;
         public bool hasAntennaFraction; public float antennaFraction;   // antenna deployment 0-1, only when the feed sends it
         public bool hasEarthDirBody; public Vector3 earthDirBody;   // simulator's Earth direction in body axes (used by the self-test)
+        public bool hasMet; public double metSeconds;                // mission elapsed time ("met_s")
+        // Panel A = +Y wing (wing_py), Panel B = -Y wing (wing_my). A continuous panel ROTATION angle in the feed is
+        // deliberately never parsed: only the deployment fraction (0-1 = 0-90 deg) drives the hinge (client feedback).
+    }
+
+    /// <summary>
+    /// One message from the power stream (port 8103): battery, temperatures, bus voltage, panel / face power...
+    /// The 8103 schema is not in the ICD yet, so every value is kept flattened ("power.battery.soc_pct" -> "87.5")
+    /// and the getters find fields by name fragments.
+    /// shortcut: name-fragment lookup, swap the getters for exact paths once the client publishes the 8103 schema.
+    /// </summary>
+    public class PowerSample
+    {
+        public float receivedRealtime;
+        public readonly System.Collections.Generic.Dictionary<string, string> fields = new System.Collections.Generic.Dictionary<string, string>();
+
+        public float BatterySocPct => Either(Num("soc"), Num("battery", "percent"));
+        public float BatteryVoltage => Num("battery", "volt");
+        public float TemperatureC => Num("temp");
+        public float BusVoltage => Num("bus", "volt");
+        public float PowerGeneratedW => Num("gen");
+        public float PowerConsumedW => Either(Num("consum"), Num("load", "w"));
+        public string LoadShed => Str("shed");
+        /// <summary>panel = "a" / "b": matches e.g. "panel_a_power_w" or "wing_py.power".</summary>
+        public float PanelPowerW(string panel) => Either(Num("panel_" + panel, "power"), Num(panel == "a" ? "py" : "my", "power"));
+
+        static float Either(float a, float b) => float.IsNaN(a) ? b : a;
+
+        /// <summary>First field whose lower-case path contains every fragment; NaN if none.</summary>
+        public float Num(params string[] fragments)
+        {
+            var s = Str(fragments);
+            return s != null && float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out float f) ? f : float.NaN;
+        }
+
+        public string Str(params string[] fragments)
+        {
+            foreach (var kv in fields)
+            {
+                string k = kv.Key.ToLowerInvariant();
+                if (Array.TrueForAll(fragments, f => k.Contains(f))) return kv.Value;
+            }
+            return null;
+        }
+    }
+
+    /// <summary>Tiny JSON flattener: {"a":{"b":[1,2]}} -> a.b[0]=1, a.b[1]=2. Strings unquoted, bools/null as text.</summary>
+    public static class FlatJson
+    {
+        public static bool TryFlatten(string json, System.Collections.Generic.Dictionary<string, string> into, out string error)
+        {
+            error = null;
+            int i = 0;
+            try { Value(json, ref i, "", into); Ws(json, ref i); if (i != json.Length) throw new FormatException("trailing text"); return true; }
+            catch (Exception e) { error = "unreadable JSON (" + e.Message + ")"; return false; }
+        }
+
+        static void Value(string s, ref int i, string path, System.Collections.Generic.Dictionary<string, string> into)
+        {
+            Ws(s, ref i);
+            if (i >= s.Length) throw new FormatException("unexpected end");
+            char c = s[i];
+            if (c == '{')
+            {
+                i++; Ws(s, ref i);
+                if (s[i] == '}') { i++; return; }
+                while (true)
+                {
+                    Ws(s, ref i); string key = Str(s, ref i); Ws(s, ref i);
+                    if (s[i++] != ':') throw new FormatException("expected ':'");
+                    Value(s, ref i, path.Length == 0 ? key : path + "." + key, into);
+                    Ws(s, ref i);
+                    if (s[i] == ',') { i++; continue; }
+                    if (s[i++] == '}') return;
+                    throw new FormatException("expected ',' or '}'");
+                }
+            }
+            if (c == '[')
+            {
+                i++; Ws(s, ref i);
+                if (s[i] == ']') { i++; return; }
+                for (int n = 0; ; n++)
+                {
+                    Value(s, ref i, path + "[" + n + "]", into);
+                    Ws(s, ref i);
+                    if (s[i] == ',') { i++; continue; }
+                    if (s[i++] == ']') return;
+                    throw new FormatException("expected ',' or ']'");
+                }
+            }
+            if (c == '"') { into[path] = Str(s, ref i); return; }
+            int start = i;
+            while (i < s.Length && ",}] \t\r\n".IndexOf(s[i]) < 0) i++;
+            if (i == start) throw new FormatException("unexpected '" + c + "'");
+            into[path] = s.Substring(start, i - start);
+        }
+
+        static string Str(string s, ref int i)
+        {
+            if (s[i] != '"') throw new FormatException("expected a string");
+            var sb = new System.Text.StringBuilder();
+            for (i++; s[i] != '"'; i++)
+            {
+                if (s[i] == '\\') { i++; sb.Append(s[i] == 'n' ? '\n' : s[i] == 't' ? '\t' : s[i]); }
+                else sb.Append(s[i]);
+            }
+            i++;
+            return sb.ToString();
+        }
+
+        static void Ws(string s, ref int i) { while (i < s.Length && char.IsWhiteSpace(s[i])) i++; }
     }
 
     /// <summary>
@@ -72,6 +183,7 @@ namespace Eosat
         public string type;
         public long seq;
         public string sim_time;
+        public double met_s = -1;
         public SmoOrbit orbit;
         public SmoAttitude attitude;
         public SmoSun sun;
@@ -133,6 +245,8 @@ namespace Eosat
                 sample.hasTime = true;
                 sample.unixTime = (dt - UnixEpoch).TotalSeconds;
             }
+
+            if (j.met_s >= 0) { sample.hasMet = true; sample.metSeconds = j.met_s; }
 
             if (j.deploy != null)
             {

@@ -86,7 +86,8 @@ namespace Eosat.Meta
         void Update()
         {
             if (!recenterInput) return;
-            bool pressed = OVRInput.GetDown(recenterButton, controllers) || OVRInput.GetDown(alternateButton, controllers);
+            // A / X click UI buttons while a ray hovers a panel (UiHoverNav), so no recenter then.
+            bool pressed = !UiHoverNav.Hovering && (OVRInput.GetDown(recenterButton, controllers) || OVRInput.GetDown(alternateButton, controllers));
             var kb = Keyboard.current;
             if (kb != null && kb[desktopKey].wasPressedThisFrame) pressed = true;
             if (pressed) Place();

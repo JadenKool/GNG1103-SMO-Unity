@@ -9,10 +9,15 @@ Shader "EOSAT/EarthDayNight"
         _NightLights ("Night lights strength", Range(0, 4)) = 1.4
         _NightAmbient ("Night side brightness", Range(0, 0.4)) = 0.07
         _Terminator ("Terminator softness", Range(0.01, 0.5)) = 0.12
+        _Alpha ("Opacity (1 = solid; <1 lets the orbit show through the night side)", Range(0.2, 1)) = 1
     }
     SubShader
     {
-        Tags { "RenderType"="Opaque" "RenderPipeline"="UniversalPipeline" "Queue"="Geometry" }
+        // Drawn just before transparents with depth write on: opaque at _Alpha = 1, see-through below it, and
+        // trails / lines behind the Earth stay hidden either way.
+        Tags { "RenderType"="Transparent" "RenderPipeline"="UniversalPipeline" "Queue"="Transparent-1" }
+        Blend SrcAlpha OneMinusSrcAlpha
+        ZWrite On
         Pass
         {
             Name "ForwardUnlit"
@@ -34,6 +39,7 @@ Shader "EOSAT/EarthDayNight"
                 float _NightLights;
                 float _NightAmbient;
                 float _Terminator;
+                float _Alpha;
             CBUFFER_END
 
             // Instancing/stereo macros let this render in both eyes with single-pass instanced VR.
@@ -63,7 +69,7 @@ Shader "EOSAT/EarthDayNight"
 
                 half3 lit = dayCol * saturate(ndl * 0.8 + 0.35);
                 half3 night = dayCol * _NightAmbient + lights * _NightLights * half3(1.0, 0.85, 0.6);
-                return half4(lerp(night, lit, day), 1);
+                return half4(lerp(night, lit, day), _Alpha);
             }
             ENDHLSL
         }

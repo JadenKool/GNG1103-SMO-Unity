@@ -124,6 +124,12 @@ namespace Eosat
             ["L stick orbit, R stick zoom"] = "stick G orbite, stick D zoom",
             ["orbit the spacecraft - full 360°"] = "orbiter autour du satellite - 360°",
             ["sticks move between buttons"] = "les sticks naviguent entre les boutons",
+            // Comfort update: Simulation Mode, controls pop-up, replay window
+            ["Simulation Mode"] = "Mode simulation", ["SIMULATION MODE"] = "MODE SIMULATION",
+            ["local preview - nothing is sent to the Flight Commander"] = "aperçu local - rien n'est envoyé au commandant de vol",
+            ["Controls"] = "Commandes", ["guide in front of you"] = "guide devant vous", ["pop-up window"] = "fenêtre flottante",
+            ["grab the bar to move, stick scrolls"] = "saisir la barre pour déplacer, le stick fait défiler",
+            ["iPad: deploy, viewpoints, axes, replay, this guide"] = "iPad : déploiement, points de vue, axes, rejeu, ce guide",
         };
 
         static Regex phrase;

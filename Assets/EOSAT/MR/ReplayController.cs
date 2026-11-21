@@ -6,6 +6,7 @@
 
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace Eosat.MR
@@ -13,7 +14,7 @@ namespace Eosat.MR
     public class ReplayController : MonoBehaviour
     {
         public TelemetryHub hub;
-        [Tooltip("Head-locked replay panel (raw data list + timeline). Shown only while replaying.")]
+        [Tooltip("Grabbable replay window (raw data list + timeline). Shown only while replaying.")]
         public GameObject panel;
         public Slider timeline;
         [Tooltip("Markers are created here, stretched over the timeline's width.")]
@@ -23,6 +24,8 @@ namespace Eosat.MR
         public Color markerColor = new Color(0.25f, 0.55f, 1f, 1f);
         [Tooltip("Seconds before an anomaly a marker jumps to.")]
         public float markerLeadSeconds = 2f;
+        [Tooltip("Clickable width of each blue marker (canvas px). The visible tick is thinner.")]
+        public float markerHitWidth = 46f;
         public float[] speeds = { 1f, 2f, 5f, 10f };
 
         public bool Replaying { get; private set; }
@@ -138,18 +141,40 @@ namespace Eosat.MR
                 var e = log[i];
                 if (!e.IsError) continue;
                 float x = (e.t - t0) / span;
+                // Generous invisible hit area (markerHitWidth px) around a thin blue tick that brightens / grows on hover.
                 var go = new GameObject("Marker " + e.kind, typeof(RectTransform), typeof(Image), typeof(Button));
                 var rt = (RectTransform)go.transform;
                 rt.SetParent(markerRow, false);
                 rt.anchorMin = new Vector2(x, 0f); rt.anchorMax = new Vector2(x, 1f);
-                rt.sizeDelta = new Vector2(14f, 0f);
-                go.GetComponent<Image>().color = markerColor;
+                rt.sizeDelta = new Vector2(markerHitWidth, 0f);
+                go.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0f);          // transparent, still raycast
+                var tick = new GameObject("Tick", typeof(RectTransform), typeof(Image));
+                var trt = (RectTransform)tick.transform;
+                trt.SetParent(rt, false);
+                trt.anchorMin = new Vector2(0.5f, 0.1f); trt.anchorMax = new Vector2(0.5f, 0.9f);
+                trt.sizeDelta = new Vector2(12f, 0f);
+                var tickImg = tick.GetComponent<Image>(); tickImg.color = Color.white; tickImg.raycastTarget = false;
+                var btn = go.GetComponent<Button>();
+                btn.targetGraphic = tickImg;
+                var cb = btn.colors;
+                cb.normalColor = markerColor; cb.highlightedColor = new Color(0.6f, 0.9f, 1f); cb.selectedColor = cb.highlightedColor;
+                cb.pressedColor = Color.white; cb.colorMultiplier = 1f; cb.fadeDuration = 0.05f;
+                btn.colors = cb;
+                go.AddComponent<MarkerHover>().tick = trt;
                 float when = e.t;
-                go.GetComponent<Button>().onClick.AddListener(() => { playing = false; Label(); Seek(when - markerLeadSeconds); });
+                btn.onClick.AddListener(() => { playing = false; Label(); Seek(when - markerLeadSeconds); });
                 markers.Add(go);
             }
         }
 
         void Label() { if (playLabel) playLabel.text = LocalizationManager.Tr(playing ? "PAUSE" : "PLAY"); }
+    }
+
+    /// <summary>Blue replay marker: the tick widens while the ray hovers it.</summary>
+    public class MarkerHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+    {
+        public RectTransform tick;
+        public void OnPointerEnter(PointerEventData e) { if (tick) tick.sizeDelta = new Vector2(22f, 0f); }
+        public void OnPointerExit(PointerEventData e) { if (tick) tick.sizeDelta = new Vector2(12f, 0f); }
     }
 }

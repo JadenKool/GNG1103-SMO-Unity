@@ -35,17 +35,17 @@ namespace Eosat.EditorTools
         const string VrPath = "Assets/Scenes/EOSAT_Visualization.unity";
         public const string OutPath = "Assets/Scenes/EOSAT_Combined.unity";
 
-        // Screen size: 1000 x 640 px at 1.05 mm per px = 1.05 x 0.67 m (was 0.9 mm: every font ~17 % larger).
-        const float ScreenW = 1000f, ScreenH = 640f, Px = 0.00105f;
+        // Comfort: screens sit 0.9 m away (inside the 0.65-0.95 m focal range) and are scaled so every font keeps
+        // a slightly LARGER angular size than the old 1.05 m-wide screens at 1.5 m.
+        // Screen size: 1000 x 640 px at 0.72 mm per px = 0.72 x 0.46 m.
+        const float ScreenW = 1000f, ScreenH = 640f, Px = 0.00072f;
         // Flight Map: wider canvas for the detailed layout (time, passes, link, map, plan strip, budgets).
-        const float MapW = 1600f, MapH = 940f, MapPx = 0.00075f;                 // 1.20 x 0.71 m
+        const float MapW = 1600f, MapH = 940f, MapPx = 0.00052f;                 // 0.83 x 0.49 m
         const float GlobeScale = 3.5f;          // Earth radius 0.12 m -> 0.42 m (84 cm across)
-        const float GlobeSwingGain = 2.6f;      // RotateInPlaceTransformer: degrees of globe per degree of hand swing
+        const float GlobeSwingGain = 3.5f;      // RotateInPlaceTransformer: degrees of Earth spin per degree of hand swing
         const float EarthDistance = 1.2f;       // metres in front of the eyes
-        const float ScreenRadius = 1.5f;        // screens / slots sit on an arc this far from the user
-        // Laser push / pull on free-floating screens (ISDK ObjectPullProvider). Was Speed 2.5 / DeadZone 0.03 = sluggish.
-        const float PullSpeed = 7f;             // metres per second per metre of hand travel toward / away from you
-        const float PullDeadZone = 0.008f;      // ignore hand jitter under 8 mm
+        const float ScreenRadius = 0.9f;        // screens / slots sit on an arc this far from the user (comfortable focus)
+        const float PopupDistance = 0.8f;       // controls guide / replay window spawn this far in front
 
         static readonly Color PanelBg = new Color(0.07f, 0.08f, 0.10f, 0.97f);
         static readonly Color BoxBg = new Color(0.13f, 0.15f, 0.18f, 1f);
@@ -171,10 +171,13 @@ namespace Eosat.EditorTools
             var globeGrab = globe.GetComponent<Grabbable>();
             foreach (var old in globe.GetComponents<ITransformer>().OfType<MonoBehaviour>().ToList()) Object.DestroyImmediate(old);
             var spin = globe.AddComponent<RotateInPlaceTransformer>();
-            SetProps(spin, ("swingGain", GlobeSwingGain));
+            // The MR EarthController sits on the MR environment root; its earthBody is the globe's Earth.
+            var mrEarth = envMR.GetComponentsInChildren<EarthController>(true).FirstOrDefault(e => e.earthBody && e.earthBody.IsChildOf(globe.transform));
+            SetProps(spin, ("swingGain", GlobeSwingGain), ("earth", mrEarth));
             // Serialized fields (warns in the Console if ISDK renames them) - Grabbable picks these up in Start.
             if (globeGrab) SetProps(globeGrab, ("_oneGrabTransformer", spin), ("_twoGrabTransformer", spin));
-            log.Add("MR globe: fixed size (zoom removed), grab = rotate in place (RotateInPlaceTransformer), no translation");
+            log.Add("MR globe: fixed size and place; grab spins ONLY the Earth about its polar axis (x" + GlobeSwingGain + "); globe, orbit and Sun stay put"
+                    + (mrEarth ? "" : "  (WARNING: no EarthController drives the globe's Earth - falls back to turning the globe about its axis)"));
             // Laser / distance grab: back to each interaction's own ISDK provider (object rides rigidly on the ray).
             foreach (var mp in globe.GetComponents<MoveAtSourceProvider>()) Object.DestroyImmediate(mp);
             foreach (var ri in globe.GetComponentsInChildren<RayInteractable>(true)) { var p = ri.GetComponent<IMovementProvider>(); if (p != null) { ri.InjectOptionalMovementProvider(p); EditorUtility.SetDirty(ri); } }
@@ -285,7 +288,7 @@ namespace Eosat.EditorTools
 
             // Slots on an arc around the user: angle (deg, + = right), height above eye level, tilt.
             // Spread a little wider than before: the screens grew (bigger fonts) and the Flight Map is 1.2 m wide.
-            var slotDefs = new (float angle, float up, float tilt)[] { (-96f, 0f, 0f), (-48f, 0f, 0f), (48f, 0f, 0f), (96f, 0f, 0f), (0f, 0.85f, -20f) };
+            var slotDefs = new (float angle, float up, float tilt)[] { (-96f, 0f, 0f), (-48f, 0f, 0f), (48f, 0f, 0f), (96f, 0f, 0f), (0f, 0.5f, -25f) };
             var slots = new List<SnapInteractable>();
             for (int i = 0; i < slotDefs.Length; i++)
             {
@@ -306,8 +309,9 @@ namespace Eosat.EditorTools
             var s2 = BuildScreen("Screen - Flight Map", layout.transform, slots[2], barMat, out var c2, MapW, MapH, MapPx);
             BuildFlightMapUI(c2, hub, mrSc, vrSc);
             AddOverlay(c2, hub, mrSc, 0.8f);
-            // Replay (session log scrubber) - head-locked panel on the right, opened from the Data Table / iPad.
-            var replay = BuildReplayPanel(centerT, systems.transform, hub, deploy);
+            // Replay (session log scrubber) - grabbable pop-up window, opened from the Data Table / iPad.
+            var trackingSpace = rigGo.transform.Find("TrackingSpace");
+            var replay = BuildReplayPanel(centerT, trackingSpace, systems.transform, hub, deploy, barMat);
             // Screen 3 - Telemetry Data
             var s3 = BuildScreen("Screen - Telemetry Data", layout.transform, slots[3], barMat, out var c3);
             var tabletUi = BuildTelemetryUI(c3, hub, overlay, deploy);
@@ -327,7 +331,8 @@ namespace Eosat.EditorTools
             var hints = layout.AddComponent<LayoutSlotHints>();
             hints.screens = screens.Select(s => s.transform).ToArray();
             hints.outlines = slots.Select(s => (Renderer)s.GetComponent<LineRenderer>()).ToArray();
-            log.Add("Screens: Data Table / Connection / Flight Map (1.20 x 0.71 m) / Telemetry Data (1.05 x 0.67 m) with grab bar, laser grab + push / pull, SnapInteractor; " + slots.Count + " layout slots");
+            log.Add($"Screens: Data Table / Connection / Flight Map ({MapW * MapPx:0.00} x {MapH * MapPx:0.00} m) / Telemetry Data ({ScreenW * Px:0.00} x {ScreenH * Px:0.00} m) at {ScreenRadius} m; " +
+                    "laser = push / pull + pitch / roll only, grab bar (direct grab) = free move, SnapInteractor; " + slots.Count + " layout slots");
 
             // ---------- VR scene extras: translucent Earth, ground track, Earth vector, axes toggle ----------
             var vrEarth = envVR.GetComponentInChildren<EarthController>(true);
@@ -344,21 +349,21 @@ namespace Eosat.EditorTools
             // Controller navigation of any panel the ray hovers (sticks move between buttons / IP octets, A / X click).
             new GameObject("UI Hover Navigation (sticks + A / X on panels)").AddComponent<UiHoverNav>().transform.SetParent(systems.transform, false);
 
-            // ================= VR: controls guide pinned top-left of the view + left-wrist iPad =================
-            var guide = BuildVrGuide(centerT);
+            // ================= VR: controls guide (centred pop-up, iPad toggle) + left-wrist iPad =================
+            var guide = BuildVrGuide(centerT, trackingSpace, envVR);
             guide.gameObject.SetActive(false);
             var leftAnchor = rigGo.transform.Find("TrackingSpace/LeftHandAnchor");
-            var ipad = BuildWristIpad(leftAnchor, hub, deploy, orbit, mrSc, replay, axesUi, out var ipadUi);
+            var ipad = BuildWristIpad(leftAnchor, hub, deploy, orbit, mrSc, replay, axesUi, guide.gameObject, out var ipadUi);
             QuickActionsAPI.AddRayCanvasInteraction(ipad.gameObject);
             QuickActionsAPI.AddPokeCanvasInteraction(ipad.gameObject);
             ipad.transform.parent.gameObject.SetActive(false);
 
-            // Command banner (head-locked, top of view, both modes): deploy commands queued to the Flight Commander.
-            BuildCommandBanner(centerT, deploy);
+            // Command banner (both modes): floats above the MR Earth, lazily follows the top of the view in VR. Never on the iPad.
+            BuildCommandBanner(centerT, trackingSpace, globe.transform, deploy);
             // Controller guide on the right controller: fades in when it is tilted down toward the body.
             BuildControllerGuide(rigGo.transform.Find("TrackingSpace/RightHandAnchor"), centerT);
-            log.Add("Added: 7 s smoothing buffer (no loading screen), Data Table, command banner, Replay panel + timeline, EN/FR toggles, two solar panels, body axes toggle, UI stick navigation, controller tilt guide");
-            log.Add("VR: controls guide pinned top-left, wrist iPad on LeftHandAnchor (telemetry, deploy commands, viewpoints, axes, replay, connections)");
+            log.Add("Added: 7 s smoothing buffer (no loading screen), Data Table, command banner, grabbable Replay window + timeline, EN/FR toggles, two solar panels, Simulation Mode, body axes toggle, UI stick navigation, controller tilt guide");
+            log.Add("VR: controls guide = centred pop-up from the iPad CONTROLS toggle; wrist iPad on LeftHandAnchor (telemetry, deploy + Simulation Mode, viewpoints, axes, replay, connections, controls)");
 
             // Any snap-back zones the Quick Actions may have added: screens must stay where they are released.
             foreach (var go in Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include))
@@ -404,8 +409,8 @@ namespace Eosat.EditorTools
             sso.FindProperty("passthroughLayer").objectReferenceValue = passLayer;
             // No skybox in VR: the procedural one drew its own sun disc (the "second sun") and a grey horizon. Space is black.
             sso.FindProperty("vrSkybox").objectReferenceValue = null;
-            // VR: guide + wrist iPad only. MR: the floating screens (Connection / Flight Map / Telemetry Data).
-            SetArray(sso.FindProperty("vrOnlyObjects"), guide.gameObject, ipad.transform.parent.gameObject);
+            // VR: wrist iPad only (the guide is shown from the iPad toggle and hides itself in MR). MR: the floating screens.
+            SetArray(sso.FindProperty("vrOnlyObjects"), ipad.transform.parent.gameObject);
             SetArray(sso.FindProperty("mrOnlyObjects"), s0, s1, s2, s3);
             sso.ApplyModifiedPropertiesWithoutUndo();
             tabletUi.switcher = sw; EditorUtility.SetDirty(tabletUi);
@@ -451,8 +456,7 @@ namespace Eosat.EditorTools
         {
             var root = new GameObject(name);
             root.transform.SetParent(parent, false);
-            root.transform.localPosition = startSlot.transform.localPosition;
-            root.transform.localRotation = startSlot.transform.localRotation;
+            if (startSlot) root.transform.SetLocalPositionAndRotation(startSlot.transform.localPosition, startSlot.transform.localRotation);
             var rb = root.AddComponent<Rigidbody>();
             rb.isKinematic = true; rb.useGravity = false; rb.interpolation = RigidbodyInterpolation.Interpolate;
 
@@ -483,13 +487,12 @@ namespace Eosat.EditorTools
             var pr = pill.GetComponent<Renderer>(); pr.sharedMaterial = barMat; pr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
             // ISDK: near grab + laser (ray) grab. Added before the canvas surfaces so only the bar is grabbable.
+            // Direct (near) grab of the bar = free move. Laser = push / pull along the ray + pitch / roll, never sideways.
             QuickActionsAPI.AddGrabInteraction(root);
             QuickActionsAPI.AddRayGrabInteraction(root);
-            // Sensitive push / pull along the laser: velocity proportional to how far the hand moves toward / away.
-            var pull = root.AddComponent<ObjectPullProvider>();
-            pull.Speed = PullSpeed; pull.DeadZone = PullDeadZone;
-            foreach (var ri in root.GetComponentsInChildren<RayInteractable>(true)) { ri.InjectOptionalMovementProvider(pull); EditorUtility.SetDirty(ri); }
-            foreach (var dg in root.GetComponentsInChildren<DistanceGrabInteractable>(true)) { dg.InjectOptionalMovementProvider(pull); EditorUtility.SetDirty(dg); }
+            var depthOnly = root.AddComponent<RayDepthOnlyProvider>();
+            foreach (var ri in root.GetComponentsInChildren<RayInteractable>(true)) { ri.InjectOptionalMovementProvider(depthOnly); EditorUtility.SetDirty(ri); }
+            foreach (var dg in root.GetComponentsInChildren<DistanceGrabInteractable>(true)) { dg.InjectOptionalMovementProvider(depthOnly); EditorUtility.SetDirty(dg); }
             var grabbable = root.GetComponent<Grabbable>();
             if (grabbable)
             {
@@ -498,6 +501,7 @@ namespace Eosat.EditorTools
                 EditorUtility.SetDirty(grabbable);
             }
 
+            if (!startSlot) return root;                                    // free window (Replay): no layout slots
             // Drag & drop: this screen can be dropped into any Layout Slot (SnapInteractable).
             var snapGo = new GameObject("ISDK_SnapInteractor");
             snapGo.transform.SetParent(root.transform, false);
@@ -725,16 +729,18 @@ namespace Eosat.EditorTools
 
             var ui = canvas.gameObject.AddComponent<TabletUIController>();
             ui.telemetry = overlay; ui.satellite = deploy;
-            ui.dataToggle = Row(root, "Row Data Overlay", "Data Overlay", 96, out ui.dataStatus, 590, 380, 112);
-            DeployButtons(root, deploy, 590, 222, 380, 72, 24, out ui.panelsStatus, out ui.antennaStatus);
-            ui.arVrToggle = Row(root, "Row MR / VR View", "MR / VR View", 496, out ui.arVrStatus, 590, 380, 112);
+            ui.dataToggle = Row(root, "Row Data Overlay", "Data Overlay", 96, out ui.dataStatus, 590, 380, 84);
+            ui.simToggle = DeployButtons(root, deploy, 590, 192, 380, 66, 24, out ui.panelsStatus, out ui.antennaStatus);   // y 192 .. 506
+            ui.arVrToggle = Row(root, "Row MR / VR View", "MR / VR View", 532, out ui.arVrStatus, 590, 380, 84);
             return ui;
         }
 
-        // Deploy commands: A, B, A&B, Antenna. They only queue a command to the Flight Commander (8104);
-        // the model moves when telemetry shows the deployment. Status lines below show angles and QUEUED.
-        static void DeployButtons(RectTransform root, SatelliteDeployControl deploy, float x, float y, float w, float h, int font,
-                                  out Text panelsStatus, out Text antennaStatus)
+        // Deploy commands: A, B, A&B, Antenna. Live: they only queue a command to the Flight Commander (8104) and the
+        // model moves when telemetry shows the deployment (status on the CommandQueueBanner, not here).
+        // Simulation Mode switch: the same buttons preview the deployment locally (nothing sent).
+        // Height used: 116 + 3 h.
+        static Toggle DeployButtons(RectTransform root, SatelliteDeployControl deploy, float x, float y, float w, float h, int font,
+                                    out Text panelsStatus, out Text antennaStatus)
         {
             Txt(root, "Deploy Header", "<color=#4DC8FF>DEPLOY  (Flight Commander approval)</color>", font - 4, TextAnchor.MiddleLeft, TextCol, x, y, w, 30);
             float bw = (w - 10) / 2f;
@@ -746,8 +752,12 @@ namespace Eosat.EditorTools
             UnityEventTools.AddPersistentListener(b.onClick, deploy.DeployPanelB);
             UnityEventTools.AddPersistentListener(ab.onClick, deploy.DeployPanelsAB);
             UnityEventTools.AddPersistentListener(ant.onClick, deploy.DeployAntenna);
-            panelsStatus = Txt(root, "Panels Status", "", font - 6, TextAnchor.MiddleLeft, new Color(0.3f, 0.78f, 1f, 1f), x, y + 50 + 2 * h, w, 28);
-            antennaStatus = Txt(root, "Antenna Status", "", font - 6, TextAnchor.MiddleLeft, new Color(0.3f, 0.78f, 1f, 1f), x, y + 78 + 2 * h, w, 28);
+            var sim = Row(root, "Row Simulation Mode", "Simulation Mode", y + 54 + 2 * h, out var simStatus, x, w, h);
+            simStatus.text = "";
+            UnityEventTools.AddPersistentListener(sim.onValueChanged, deploy.SetSimulationMode);
+            panelsStatus = Txt(root, "Panels Status", "", font - 6, TextAnchor.MiddleLeft, new Color(0.3f, 0.78f, 1f, 1f), x, y + 60 + 3 * h, w, 28);
+            antennaStatus = Txt(root, "Antenna Status", "", font - 6, TextAnchor.MiddleLeft, new Color(0.3f, 0.78f, 1f, 1f), x, y + 88 + 3 * h, w, 28);
+            return sim;
         }
 
         static Toggle Row(RectTransform root, string name, string label, float y, out Text status, float x = 590, float w = 380, float h = 118)
@@ -769,20 +779,20 @@ namespace Eosat.EditorTools
             for (int i = 0; i < items.Length; i++) p.GetArrayElementAtIndex(i).objectReferenceValue = items[i];
         }
 
-        // ---------------- VR: controls guide pinned to the top-left of the view ----------------
-        static Canvas BuildVrGuide(Transform centerEye)
+        // ---------------- VR: controls guide - centred pop-up toggled from the iPad ----------------
+        static Canvas BuildVrGuide(Transform centerEye, Transform trackingSpace, GameObject envVR)
         {
-            var cgo = new GameObject("VR Controls Guide (pinned top-left of view)", typeof(RectTransform));
-            cgo.transform.SetParent(centerEye, false);
+            var cgo = new GameObject("VR Controls Guide (centred pop-up, iPad CONTROLS toggle)", typeof(RectTransform));
+            cgo.transform.SetParent(trackingSpace, false);                     // moves with the rig in the orbit view, not with the head
+            var place = cgo.AddComponent<ComfortPlacement>();                   // appears straight ahead each time it is opened
+            place.head = centerEye; place.distance = PopupDistance; place.up = -0.05f; place.follow = false;
+            place.onlyWhileActive = envVR;                                      // hidden in MR mode
             var rt = (RectTransform)cgo.transform;
-            rt.pivot = new Vector2(0f, 1f);                                     // anchor point = the panel's top-left corner
-            rt.localPosition = new Vector3(-0.44f, 0.26f, 0.9f);                // ~26 deg left, ~16 deg up, 0.9 m out
-            rt.localRotation = Quaternion.LookRotation(new Vector3(-0.29f, 0.18f, 0.9f));   // faces the eye
             var canvas = cgo.AddComponent<Canvas>(); canvas.renderMode = RenderMode.WorldSpace;
             canvas.sortingOrder = 10;
             var scaler = cgo.AddComponent<CanvasScaler>(); scaler.dynamicPixelsPerUnit = 2f;
-            rt.sizeDelta = new Vector2(760, 380); rt.localScale = Vector3.one * 0.00042f;   // 0.32 x 0.16 m
-            Img(Stretch(rt, "Background"), new Color(0.07f, 0.08f, 0.10f, 0.78f), false);
+            rt.sizeDelta = new Vector2(760, 380); rt.localScale = Vector3.one * 0.0005f;    // 0.38 x 0.19 m at 0.8 m
+            Img(Stretch(rt, "Background"), new Color(0.05f, 0.06f, 0.08f, 0.92f), false);
             Txt(rt, "Title", "<b>VR CONTROLS</b>", 34, TextAnchor.MiddleLeft, TextCol, 24, 10, 500, 46);
             Txt(rt, "Guide",
                 "<color=#4DC8FF>LEFT STICK</color>   orbit the spacecraft - full 360°\n" +
@@ -790,16 +800,16 @@ namespace Eosat.EditorTools
                 "<color=#4DC8FF>A  /  X</color>   recentre  (on a panel: click)\n" +
                 "<color=#4DC8FF>B  /  Y</color>   switch MR tabletop / VR orbit\n" +
                 "<color=#4DC8FF>RAY ON A PANEL</color>   sticks move between buttons\n" +
-                "<color=#4DC8FF>LEFT WRIST</color>   iPad: deploy, viewpoints, axes, replay",
+                "<color=#4DC8FF>LEFT WRIST</color>   iPad: deploy, viewpoints, axes, replay, this guide",
                 24, TextAnchor.UpperLeft, TextCol, 24, 60, 720, 310).lineSpacing = 1.25f;
             return canvas;
         }
 
         // ---------------- VR: iPad on the left wrist ----------------
-        const float IpadW = 1100f, IpadH = 700f, IpadPx = 0.0003f;          // 0.33 x 0.21 m (was 0.25 x 0.17)
+        const float IpadW = 1100f, IpadH = 820f, IpadPx = 0.0003f;          // 0.33 x 0.25 m
 
         static Canvas BuildWristIpad(Transform leftHand, TelemetryHub hub, SatelliteDeployControl deploy, OrbitalViewerLocomotion orbit,
-                                     SpacecraftController sc, ReplayController replay, AxesToggle axes, out TabletUIController ui)
+                                     SpacecraftController sc, ReplayController replay, AxesToggle axes, GameObject guide, out TabletUIController ui)
         {
             var mount = new GameObject("Wrist iPad (VR, left wrist)");
             mount.transform.SetParent(leftHand, false);
@@ -820,7 +830,7 @@ namespace Eosat.EditorTools
             // Left: glanceable telemetry (lat / lon / alt, panels, antenna, battery / temp, link)
             Txt(screen, "Title", "<b>EOSAT-1</b>", 36, TextAnchor.MiddleLeft, TextCol, 22, 8, 260, 50);
             LanguageRow(screen, 290, 6, 200, 52);
-            var box = Box(screen, "Telemetry Data", 18, 66, 480, 590); Img(box, BoxBg, false);
+            var box = Box(screen, "Telemetry Data", 18, 66, 480, 700); Img(box, BoxBg, false);
             var data = Txt(box, "Readout", "Waiting for telemetry...", 30, TextAnchor.UpperLeft, TextCol, 18, 14, 450, 480);
             data.lineSpacing = 1.25f;
             var readout = cgo.AddComponent<TelemetryReadoutUI>(); readout.hub = hub; readout.dataText = data;
@@ -830,35 +840,39 @@ namespace Eosat.EditorTools
             ui = cgo.AddComponent<TabletUIController>();
             ui.satellite = deploy;
             const float rx = 512, rw = 546;
-            DeployButtons(screen, deploy, rx, 6, rw, 64, 24, out ui.panelsStatus, out ui.antennaStatus);   // y 6 .. 252
+            // No command status here: queued / executed commands show on the banner (top of view), not on the wrist.
+            ui.simToggle = DeployButtons(screen, deploy, rx, 6, rw, 56, 24, out ui.panelsStatus, out ui.antennaStatus);   // y 6 .. 290
 
             // Viewpoints (tumble lock greys out the two spacecraft-fixed ones)
-            Txt(screen, "Views Header", "<color=#4DC8FF>VIEWPOINT</color>", 20, TextAnchor.MiddleLeft, TextCol, rx, 258, rw, 28);
+            Txt(screen, "Views Header", "<color=#4DC8FF>VIEWPOINT</color>", 20, TextAnchor.MiddleLeft, TextCol, rx, 296, rw, 28);
             var vp = cgo.AddComponent<ViewpointButtonsUI>();
             vp.orbit = orbit; vp.idleColor = Idle; vp.activeColor = Accent;
             string[] viewNames = { "FREE", "EARTH", "SUN", "NADIR", "PANEL" };
             float vw = (rw - 4 * 8) / 5f;
-            for (int i = 0; i < 5; i++) vp.buttons[i] = Btn(screen, "Button View " + viewNames[i], viewNames[i], rx + i * (vw + 8), 288, vw, 62, Idle, 21);
-            vp.status = Txt(screen, "View Status", "", 18, TextAnchor.MiddleLeft, Dim, rx, 352, rw, 26);
+            for (int i = 0; i < 5; i++) vp.buttons[i] = Btn(screen, "Button View " + viewNames[i], viewNames[i], rx + i * (vw + 8), 326, vw, 62, Idle, 21);
+            vp.status = Txt(screen, "View Status", "", 18, TextAnchor.MiddleLeft, Dim, rx, 390, rw, 26);
 
-            // Toggles: MR / VR, connections, axes, replay
+            // Toggles: MR / VR, connections, axes, replay, controls guide
             float tw = (rw - 10) / 2f;
-            ui.arVrToggle = Row(screen, "Row MR / VR View", "MR / VR", 384, out ui.arVrStatus, rx, tw, 84);
-            var connToggle = Row(screen, "Row Connections", "Connections", 384, out var connRowStatus, rx + tw + 10, tw, 84);
+            ui.arVrToggle = Row(screen, "Row MR / VR View", "MR / VR", 422, out ui.arVrStatus, rx, tw, 84);
+            var connToggle = Row(screen, "Row Connections", "Connections", 422, out var connRowStatus, rx + tw + 10, tw, 84);
             connRowStatus.text = "source, address";
-            var axesToggle = Row(screen, "Row Axes", "Quaternion axes", 476, out var axesStatus, rx, tw, 84);
+            var axesToggle = Row(screen, "Row Axes", "Quaternion axes", 514, out var axesStatus, rx, tw, 84);
             axesStatus.text = "shown by default";
             axesToggle.isOn = true;
             UnityEventTools.AddPersistentListener(axesToggle.onValueChanged, axes.SetVisible);
-            var replayToggle = Row(screen, "Row Replay", "Replay", 476, out var replayStatus, rx + tw + 10, tw, 84);
-            replayStatus.text = "scrub the session log";
+            var replayToggle = Row(screen, "Row Replay", "Replay", 514, out var replayStatus, rx + tw + 10, tw, 84);
+            replayStatus.text = "pop-up window";
             UnityEventTools.AddPersistentListener(replayToggle.onValueChanged, replay.SetReplay);
-            var cam = Btn(screen, "Button Camera Target", "", rx, 570, rw, 96, new Color(0.2f, 0.55f, 1f, 1f), 20);
+            var guideToggle = Row(screen, "Row Controls Guide", "Controls", 606, out var guideStatus, rx, tw, 84);
+            guideStatus.text = "guide in front of you";
+            UnityEventTools.AddPersistentListener(guideToggle.onValueChanged, guide.SetActive);
+            var cam = Btn(screen, "Button Camera Target", "", rx + tw + 10, 606, tw, 84, new Color(0.2f, 0.55f, 1f, 1f), 20);
             var t = cgo.AddComponent<OrbitTargetToggleUI>();
             t.orbit = orbit; t.button = cam; t.label = cam.GetComponentInChildren<Text>(); t.background = cam.GetComponent<Image>();
 
             // Connections panel: covers the telemetry box while the Connections toggle is on.
-            var panel = Box(screen, "Connections Panel (toggle)", 18, 66, 480, 590); Img(panel, new Color(0.10f, 0.12f, 0.15f, 1f), true);
+            var panel = Box(screen, "Connections Panel (toggle)", 18, 66, 480, 700); Img(panel, new Color(0.10f, 0.12f, 0.15f, 1f), true);
             Txt(panel, "Title", "<color=#4DC8FF><b>CONNECTIONS</b></color>", 24, TextAnchor.MiddleLeft, TextCol, 16, 6, 300, 36);
             var dd = SourceDropdown(panel, 16, 46, 448, 58);
             var status = Txt(panel, "Status", "", 22, TextAnchor.MiddleLeft, TextCol, 16, 110, 450, 32);
@@ -940,13 +954,14 @@ namespace Eosat.EditorTools
             t.hub = hub; t.deploy = deploy; t.keysText = keys; t.valuesText = vals; t.refreshHz = 1f; t.showRaw = false;
         }
 
-        // ---------------- Command banner (head-locked, top of view) ----------------
-        static void BuildCommandBanner(Transform centerEye, SatelliteDeployControl deploy)
+        // ---------------- Command banner: above the MR Earth, or lazily following the top of the view in VR ----------------
+        static void BuildCommandBanner(Transform centerEye, Transform trackingSpace, Transform mrGlobe, SatelliteDeployControl deploy)
         {
-            var cgo = new GameObject("Command Queue Banner (top of view)", typeof(RectTransform));
-            cgo.transform.SetParent(centerEye, false);
-            cgo.transform.localPosition = new Vector3(0f, 0.26f, 1.0f);
-            cgo.transform.localRotation = Quaternion.LookRotation(new Vector3(0f, 0.26f, 1.0f));
+            var cgo = new GameObject("Command Queue Banner (above the Earth / top of view)", typeof(RectTransform));
+            cgo.transform.SetParent(trackingSpace, false);
+            var place = cgo.AddComponent<ComfortPlacement>();
+            place.head = centerEye; place.distance = 0.95f; place.up = 0.32f; place.follow = true;   // ~19 deg above the eye line
+            place.anchorAbove = mrGlobe; place.aboveHeight = 0.42f + 0.22f;                         // just over the MR Earth's north pole
             var canvas = cgo.AddComponent<Canvas>(); canvas.renderMode = RenderMode.WorldSpace; canvas.sortingOrder = 15;
             var scaler = cgo.AddComponent<CanvasScaler>(); scaler.dynamicPixelsPerUnit = 2f;
             var rt = (RectTransform)cgo.transform; rt.sizeDelta = new Vector2(1300, 150); rt.localScale = Vector3.one * 0.0006f;   // 0.78 x 0.09 m
@@ -956,20 +971,19 @@ namespace Eosat.EditorTools
             banner.deploy = deploy; banner.text = text;
         }
 
-        // ---------------- Replay: head-locked right-side panel with the raw data list + timeline ----------------
-        static ReplayController BuildReplayPanel(Transform centerEye, Transform systems, TelemetryHub hub, SatelliteDeployControl deploy)
+        // ---------------- Replay: grabbable pop-up window (grab bar) with the raw data list + timeline ----------------
+        static ReplayController BuildReplayPanel(Transform centerEye, Transform trackingSpace, Transform systems, TelemetryHub hub,
+                                                 SatelliteDeployControl deploy, Material barMat)
         {
-            var cgo = new GameObject("Replay Panel (head-locked, right)", typeof(RectTransform));
-            cgo.transform.SetParent(centerEye, false);
-            var pos = new Vector3(0.40f, -0.02f, 0.80f);
-            cgo.transform.localPosition = pos;
-            cgo.transform.localRotation = Quaternion.LookRotation(pos);
-            var canvas = cgo.AddComponent<Canvas>(); canvas.renderMode = RenderMode.WorldSpace; canvas.sortingOrder = 12;
-            var scaler = cgo.AddComponent<CanvasScaler>(); scaler.dynamicPixelsPerUnit = 2f;
-            cgo.AddComponent<GraphicRaycaster>();
-            var rt = (RectTransform)cgo.transform; rt.sizeDelta = new Vector2(760, 1000); rt.localScale = Vector3.one * 0.00045f;   // 0.34 x 0.45 m
-            Img(Stretch(rt, "Background"), new Color(0.05f, 0.06f, 0.08f, 0.94f), true);
-            Txt(rt, "Title", "<b>REPLAY</b>  <size=22><color=#9AA6B8>all telemetry, scroll with the stick</color></size>", 36, TextAnchor.MiddleLeft, TextCol, 20, 8, 720, 52);
+            // Same window as the MR screens (grab bar, laser push / pull + tilt, direct grab moves it), but no layout slot.
+            // Lives in the rig's TrackingSpace so it stays with the user in the VR orbit view; opens straight ahead, slightly right.
+            var root = BuildScreen("Replay Window (grab bar)", trackingSpace, null, barMat, out var canvas, 760f, 1000f, 0.00048f);   // 0.36 x 0.48 m
+            var place = root.AddComponent<ComfortPlacement>();
+            place.head = centerEye; place.distance = PopupDistance; place.right = 0.12f; place.up = -0.06f; place.follow = false;
+            var cgo = canvas.gameObject;
+            canvas.sortingOrder = 12;
+            var rt = (RectTransform)cgo.transform;
+            Txt(rt, "Title", "<b>REPLAY</b>  <size=22><color=#9AA6B8>grab the bar to move, stick scrolls</color></size>", 36, TextAnchor.MiddleLeft, TextCol, 20, 8, 720, 52);
             var timeText = Txt(rt, "Time", "", 22, TextAnchor.MiddleLeft, new Color(1f, 0.75f, 0.3f), 20, 62, 720, 30);
 
             // Scrollable key / value list (DataTableUI with raw values + power fields + command log)
@@ -997,8 +1011,8 @@ namespace Eosat.EditorTools
             var table = cgo.AddComponent<DataTableUI>();
             table.hub = hub; table.deploy = deploy; table.keysText = keys; table.valuesText = vals; table.refreshHz = 2f; table.showRaw = true;
 
-            // Timeline: blue anomaly markers above the slider
-            var markers = Box(rt, "Anomaly Markers", 36, 808, 688, 30);
+            // Timeline: clickable blue anomaly markers above the slider (tall row = easy laser target)
+            var markers = Box(rt, "Anomaly Markers (click to jump)", 36, 800, 688, 44);
             Img(markers, new Color(0.02f, 0.02f, 0.03f, 1f), false);
             var sliderGo = DefaultControls.CreateSlider(new DefaultControls.Resources());
             sliderGo.name = "Timeline";
@@ -1010,22 +1024,43 @@ namespace Eosat.EditorTools
             var speed = Btn(rt, "Button Speed", "SPEED", 270, 906, 210, 70, Idle, 26);
             var live = Btn(rt, "Button Live", "LIVE", 504, 906, 220, 70, new Color(0.15f, 0.6f, 0.3f, 1f), 28);
             QuickActionsAPI.AddRayCanvasInteraction(cgo);
+            QuickActionsAPI.AddPokeCanvasInteraction(cgo);
 
             var ctrlGo = new GameObject("Replay Controller");
             ctrlGo.transform.SetParent(systems, false);
             var ctrl = ctrlGo.AddComponent<ReplayController>();
-            ctrl.hub = hub; ctrl.panel = cgo; ctrl.timeline = sliderGo.GetComponent<Slider>(); ctrl.markerRow = markers;
+            ctrl.hub = hub; ctrl.panel = root; ctrl.timeline = sliderGo.GetComponent<Slider>(); ctrl.markerRow = markers;
             ctrl.timeText = timeText; ctrl.playLabel = play.GetComponentInChildren<Text>();
             UnityEventTools.AddPersistentListener(play.onClick, ctrl.TogglePlay);
             UnityEventTools.AddPersistentListener(speed.onClick, ctrl.NextSpeed);
             UnityEventTools.AddPersistentListener(live.onClick, ctrl.GoLive);
-            cgo.SetActive(false);
+            root.SetActive(false);
             return ctrl;
         }
 
         // ---------------- VR scene: translucent Earth, colour-coded ground track, Earth vector, axes toggle ----------------
         static void VrSceneExtras(EarthController earth, SpacecraftController sc, GameObject spacecraftGo, List<string> log)
         {
+            // Sun a little brighter and bigger so it is easy to find (Look at Sun / Earth-up views) without washing out the scene.
+            var sunR = earth && earth.sunVisual ? earth.sunVisual.GetComponent<Renderer>() : null;
+            if (sunR && sunR.sharedMaterial)
+            {
+                const string sunPath = "Assets/EOSAT/Materials/COMBINED_SunVR_Bright.mat";
+                const float glow = 1.5f, grow = 1.3f;
+                if (AssetDatabase.GetAssetPath(sunR.sharedMaterial) != sunPath)   // never brighten twice
+                {
+                    var m = AssetDatabase.LoadAssetAtPath<Material>(sunPath);
+                    if (!m) { m = new Material(sunR.sharedMaterial); AssetDatabase.CreateAsset(m, sunPath); }
+                    else m.CopyPropertiesFromMaterial(sunR.sharedMaterial);
+                    foreach (var prop in new[] { "_BaseColor", "_Color", "_EmissionColor" })
+                        if (m.HasProperty(prop)) { var c = m.GetColor(prop); m.SetColor(prop, new Color(c.r * glow, c.g * glow, c.b * glow, c.a)); }
+                    EditorUtility.SetDirty(m);
+                    sunR.sharedMaterial = m;
+                    earth.sunVisual.localScale *= grow;
+                    log.Add($"VR Sun: colour / glow x{glow}, size x{grow}");
+                }
+            }
+
             if (earth && earth.earthBody)
             {
                 var r = earth.earthBody.GetComponent<Renderer>();

@@ -1,4 +1,5 @@
-// CommandQueueBanner.cs - banner at the top of the view listing deploy commands queued to the Flight Commander.
+// CommandQueueBanner.cs - banner listing deploy commands queued to the Flight Commander (and Simulation Mode).
+// Placed by ComfortPlacement: floats above the MR Earth, or lazily follows the top of the view in VR - never on the iPad.
 // The satellite model does not change when a command is sent; the banner is the only feedback until telemetry
 // shows the deployment, then the line turns green ("executed") for a few seconds and disappears.
 
@@ -23,11 +24,12 @@ namespace Eosat.MR
 
         void Update()
         {
-            bool any = deploy && deploy.Commands.Count > 0;
+            bool any = deploy && (deploy.Commands.Count > 0 || deploy.SimulationMode);
             group.alpha = Mathf.MoveTowards(group.alpha, any ? 1f : 0f, Time.unscaledDeltaTime / Mathf.Max(0.01f, fadeSeconds));
             if (!any || !text || Time.unscaledTime < nextText) return;
             nextText = Time.unscaledTime + 0.25f;
             sb.Clear();
+            if (deploy.SimulationMode) sb.Append("<color=#C88CFF><b>SIMULATION MODE</b></color>  local preview - nothing is sent to the Flight Commander");
             foreach (var c in deploy.Commands)
             {
                 if (sb.Length > 0) sb.Append('\n');

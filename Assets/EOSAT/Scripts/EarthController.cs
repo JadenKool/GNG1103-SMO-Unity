@@ -15,6 +15,9 @@ namespace Eosat
         public Transform sunVisual;
         public float sunVisualDistance = 400f;
 
+        [Tooltip("Extra spin about the polar axis added by the user's grab (MR globe). 0 = true Earth orientation.")]
+        public float userSpinDeg;
+
         public Vector3 SunDirUnity { get; private set; } = Vector3.right;
         public double CurrentUnix { get; private set; }
 
@@ -24,7 +27,7 @@ namespace Eosat
             double jd = EciMath.JulianDate(CurrentUnix);
 
             // Earth rotates +GMST about ECI +Z; in Unity's reflected frame that is -GMST about +Y.
-            if (earthBody) earthBody.localRotation = Quaternion.AngleAxis(-(float)EciMath.GmstDegrees(jd), Vector3.up);
+            if (earthBody) earthBody.localRotation = Quaternion.AngleAxis(-(float)EciMath.GmstDegrees(jd) + userSpinDeg, Vector3.up);
 
             SunDirUnity = EciMath.EciToUnity(EciMath.SunDirectionEci(jd));
             if (sunLight) sunLight.transform.rotation = Quaternion.LookRotation(-SunDirUnity);

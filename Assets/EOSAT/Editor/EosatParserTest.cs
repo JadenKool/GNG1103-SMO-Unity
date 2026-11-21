@@ -66,6 +66,11 @@ namespace Eosat.EditorTools
             Check(Mathf.Abs(ll.x - 90f) < 0.01f, "north pole latitude");
             Check(Eosat.MR.FlightMapUI.MapPosition(90f, 180f, new Vector2(1000, 500)) == new Vector2(500, 250), "map corner");
 
+            // MR globe: only the angle AROUND the polar axis counts (moving the hand up / down the globe does not spin it).
+            float spin = Eosat.Meta.RotateInPlaceTransformer.SpinAngle(Vector3.forward, Vector3.right + Vector3.up * 5f, Vector3.up);
+            Check(Mathf.Abs(Mathf.Abs(spin) - 90f) < 0.01f, "polar spin angle ignores the vertical part (" + spin + ")");
+            Check(Eosat.Meta.RotateInPlaceTransformer.SpinAngle(Vector3.up, Vector3.forward, Vector3.up) == 0f, "grab at the pole does not spin");
+
             if (fails == 0) Debug.Log("[EOSAT self-test] all checks passed");
         }
 

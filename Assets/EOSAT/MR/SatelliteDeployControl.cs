@@ -57,18 +57,26 @@ namespace Eosat.MR
         public bool PanelBStuck { get; private set; }
         public IReadOnlyList<PendingCommand> Commands => commands;
 
+        // Model state only. Queued / executed command status lives on the CommandQueueBanner (top of view / above the Earth),
+        // never on the wrist iPad.
         public string AntennaStatus =>
-            (deployables && deployables.Antenna == AntennaState.Jammed ? "<color=#FF6A6A>JAMMED</color>" : AntennaDeployed ? "DEPLOYED" : "STOWED")
-            + Queued(DeployCommand.Antenna);
-        public string PanelAStatus => PanelText(deployables ? deployables.WingPyFraction : 0f, PanelAStuck) + Queued(DeployCommand.PanelA);
-        public string PanelBStatus => PanelText(deployables ? deployables.WingMyFraction : 0f, PanelBStuck) + Queued(DeployCommand.PanelB);
+            deployables && deployables.Antenna == AntennaState.Jammed ? "<color=#FF6A6A>JAMMED</color>" : AntennaDeployed ? "DEPLOYED" : "STOWED";
+        public string PanelAStatus => PanelText(deployables ? deployables.WingPyFraction : 0f, PanelAStuck);
+        public string PanelBStatus => PanelText(deployables ? deployables.WingMyFraction : 0f, PanelBStuck);
         public string PanelsStatus => deployables && deployables.singlePanel ? PanelAStatus
-            : $"A {PanelText(deployables ? deployables.WingPyFraction : 0f, PanelAStuck)}   B {PanelText(deployables ? deployables.WingMyFraction : 0f, PanelBStuck)}"
-              + Queued(DeployCommand.PanelsAB);
+            : $"A {PanelText(deployables ? deployables.WingPyFraction : 0f, PanelAStuck)}   B {PanelText(deployables ? deployables.WingMyFraction : 0f, PanelBStuck)}";
+
+        /// <summary>Local preview: deploy buttons animate the model at once; nothing is sent, telemetry deploy states are ignored.</summary>
+        public bool SimulationMode { get; private set; }
 
         readonly List<PendingCommand> commands = new List<PendingCommand>();
         float lastA = -1f, lastB = -1f, movedA, movedB;
         bool jamLogged;
+        // Last deploy state from telemetry, restored when Simulation Mode is switched off.
+        bool haveTlm, tlmHasWings;
+        float tlmA, tlmB, simA, simB;
+        PanelState tlmPanels = PanelState.Unknown;
+        AntennaState tlmAntenna = AntennaState.Unknown;
 
         void Awake()
         {
@@ -105,9 +113,11 @@ namespace Eosat.MR
             if (!followTelemetry || !deployables) return;
             bool wasAntenna = AntennaDeployed, wasPanels = PanelsDeployed;
 
-            if (s.antenna != AntennaState.Unknown) All(d => d.SetTargets(PanelState.Unknown, s.antenna));
-            if (s.hasWings) All(d => d.SetWingFractions(s.wingPyFraction, s.wingMyFraction));
-            else if (s.panels != PanelState.Unknown) All(d => d.SetTargets(s.panels, AntennaState.Unknown));
+            haveTlm = true;
+            if (s.antenna != AntennaState.Unknown) tlmAntenna = s.antenna;
+            if (s.hasWings) { tlmHasWings = true; tlmA = s.wingPyFraction; tlmB = s.wingMyFraction; }
+            else if (s.panels != PanelState.Unknown) { tlmHasWings = false; tlmPanels = s.panels; }
+            if (!SimulationMode) ApplyTelemetryState();
 
             float a = s.hasWings ? s.wingPyFraction : s.panels == PanelState.Deployed ? 1f : 0f;
             float b = s.hasWings ? s.wingMyFraction : a;
@@ -119,6 +129,33 @@ namespace Eosat.MR
 
             if (AntennaDeployed != wasAntenna) onAntennaStateChanged?.Invoke(AntennaDeployed);
             if (PanelsDeployed != wasPanels) onPanelsStateChanged?.Invoke(PanelsDeployed);
+        }
+
+        void ApplyTelemetryState()
+        {
+            if (!haveTlm) return;
+            if (tlmAntenna != AntennaState.Unknown) All(d => d.SetTargets(PanelState.Unknown, tlmAntenna));
+            if (tlmHasWings) All(d => d.SetWingFractions(tlmA, tlmB));
+            else if (tlmPanels != PanelState.Unknown) All(d => d.SetTargets(tlmPanels, AntennaState.Unknown));
+        }
+
+        /// <summary>Simulation Mode on: model starts stowed and the deploy buttons preview locally. Off: back to telemetry.</summary>
+        public void SetSimulationMode(bool on)
+        {
+            if (on == SimulationMode) return;
+            SimulationMode = on;
+            if (on) { simA = simB = 0f; All(d => { d.SetWingFractions(0f, 0f); d.SetTargets(PanelState.Unknown, AntennaState.Stowed); }); }
+            else if (haveTlm) ApplyTelemetryState();
+            else Start();
+        }
+        public void ToggleSimulationMode() => SetSimulationMode(!SimulationMode);
+
+        void Preview(DeployCommand command)
+        {
+            if (command == DeployCommand.Antenna) { All(d => d.SetTargets(PanelState.Unknown, AntennaState.Deployed)); return; }
+            if (command != DeployCommand.PanelB) simA = 1f;
+            if (command != DeployCommand.PanelA) simB = 1f;
+            All(d => d.SetWingFractions(simA, simB));
         }
 
         void Verify(float a, float b, AntennaState antenna)
@@ -160,6 +197,7 @@ namespace Eosat.MR
         /// <summary>Queue a command to the Flight Commander. The 3D model does not change here.</summary>
         public void Request(DeployCommand command)
         {
+            if (SimulationMode) { Preview(command); return; }                         // local preview: nothing sent
             if (commands.Exists(c => c.command == command && !c.verified)) return;   // already waiting
             var p = new PendingCommand { command = command, queuedAt = Time.time };
             string wire = command switch
@@ -178,9 +216,6 @@ namespace Eosat.MR
         public void SetPanelsDeployed(bool deployed) { if (deployed && !PanelsDeployed) DeployPanelsAB(); }
         public void ToggleAntenna() => SetAntennaDeployed(!AntennaDeployed);
         public void TogglePanels() => SetPanelsDeployed(!PanelsDeployed);
-
-        string Queued(DeployCommand c) =>
-            commands.Exists(p => p.command == c && !p.verified) ? "  |  <color=#FFB000>QUEUED TO FLIGHT COMMANDER</color>" : "";
 
         static string PanelText(float f, bool stuck) =>
             f >= 0.999f ? "DEPLOYED 90°" :

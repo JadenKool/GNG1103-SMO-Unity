@@ -15,6 +15,8 @@ namespace Eosat.MR
         public Toggle panelsToggle;
         [Tooltip("isOn = passthrough (AR), off = virtual skybox (VR). EnvironmentManager listens to it.")]
         public Toggle arVrToggle;
+        [Tooltip("Simulation Mode (local deploy preview). Wired to SatelliteDeployControl.SetSimulationMode by the builder.")]
+        public Toggle simToggle;
 
         [Header("Status labels")]
         public Text dataStatus;
@@ -65,6 +67,8 @@ namespace Eosat.MR
             if (Time.unscaledTime < nextSync) return;   // perf: labels at 10 Hz instead of every frame
             nextSync = Time.unscaledTime + 0.1f;
             SyncFromScene();
+            // Simulation Mode is shared by the MR screen and the iPad: keep both switches showing the real state.
+            if (simToggle && satellite && simToggle.isOn != satellite.SimulationMode) simToggle.SetIsOnWithoutNotify(satellite.SimulationMode);
         }
 
         public void OnDataToggled(bool on)

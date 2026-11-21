@@ -1,6 +1,8 @@
 // UiHoverNav.cs - controller navigation of uGUI panels while an ISDK ray hovers them.
 //   Thumbstick flick  : move between buttons (Selectable.FindSelectableOnUp / Down / Left / Right)
-//   On an IP field    : up / down change the current octet (wraps 0-255), left / right move between octets
+//   On an IP field    : the octet under the pointer is highlighted; up / down (or A / X = +1) change it (wraps 0-255),
+//                       left / right move between octets
+//   Pointer           : the highlighted control follows whatever the ray points at
 //   Stick Y (held)    : scrolls a ScrollRect on the hovered panel (Replay list)
 //   A / X             : click the highlighted control
 // While Hovering is true the VR orbit / zoom sticks and the A / X recenter are paused (OrbitalViewerLocomotion,
@@ -45,8 +47,14 @@ namespace Eosat.Meta
                 if (c) { hit = c.rootCanvas; hitPoint = r.End; break; }
             }
             Hovering = hit;
-            if (!hit) { canvas = null; current = null; return; }
+            if (!hit) { canvas = null; current = null; ShowOctet(null); return; }
             if (hit != canvas) { canvas = hit; current = Nearest(hit, hitPoint); octet = 0; Highlight(); }
+
+            // The highlight follows the pointer; on the IP field the octet under the pointer is picked.
+            var under = Under(canvas, hitPoint);
+            if (under && under != current) { current = under; octet = 0; Highlight(); }
+            if (under is InputField uf && TrySplitIp(uf.text, out _, out _)) octet = OctetAt(uf, hitPoint, octet);
+            ShowOctet(current as InputField);
 
             Vector2 stick = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.Touch)
                           + OVRInput.Get(OVRInput.Axis2D.SecondaryThumbstick, OVRInput.Controller.Touch);
@@ -111,7 +119,8 @@ namespace Eosat.Meta
 
         void Click()
         {
-            if (!current || !current.IsInteractable() || current is InputField) return;   // fields: no system keyboard in VR
+            if (current is InputField f) { StepOctet(f, MoveDirection.Up); return; }        // A / X: +1 on the highlighted octet
+            if (!current || !current.IsInteractable()) return;
             ExecuteEvents.Execute(current.gameObject, new BaseEventData(EventSystem.current), ExecuteEvents.submitHandler);
         }
 
@@ -126,6 +135,67 @@ namespace Eosat.Meta
         {
             var es = EventSystem.current;
             if (es) es.SetSelectedGameObject(current ? current.gameObject : null);
+        }
+
+        static Selectable Under(Canvas c, Vector3 p)
+        {
+            foreach (var s in c.GetComponentsInChildren<Selectable>())
+            {
+                if (!s.IsInteractable() || !s.isActiveAndEnabled) continue;
+                var rt = (RectTransform)s.transform;
+                if (rt.rect.Contains(rt.InverseTransformPoint(p))) return s;
+            }
+            return null;
+        }
+
+        /// <summary>Which IPv4 octet (0-3) of the field's text is under world point p. Keeps fallback past the IP part.</summary>
+        static int OctetAt(InputField f, Vector3 p, int fallback)
+        {
+            var t = f.textComponent;
+            if (!t) return fallback;
+            var chars = t.cachedTextGenerator.characters;
+            int ipLen = f.text.IndexOfAny(new[] { ':', '/' }); if (ipLen < 0) ipLen = f.text.Length;
+            float x = t.rectTransform.InverseTransformPoint(p).x * t.pixelsPerUnit;
+            int dots = 0;
+            for (int i = 0; i < ipLen && i < chars.Count - 1; i++)
+            {
+                if (x < (chars[i].cursorPos.x + chars[i + 1].cursorPos.x) * 0.5f) return dots;
+                if (f.text[i] == '.') dots++;
+            }
+            return x < (chars.Count > ipLen ? chars[ipLen].cursorPos.x : float.MaxValue) ? Mathf.Min(dots, 3) : fallback;
+        }
+
+        Image octetBox;
+
+        // Translucent box behind the highlighted octet of an IP field (no focus needed, so no system keyboard).
+        void ShowOctet(InputField f)
+        {
+            bool show = f && f.textComponent && TrySplitIp(f.text, out _, out _);
+            if (!show) { if (octetBox) octetBox.enabled = false; return; }
+            var t = f.textComponent;
+            if (!octetBox || octetBox.transform.parent != t.transform.parent)
+            {
+                if (!octetBox) { octetBox = new GameObject("IP Octet Highlight", typeof(RectTransform)).AddComponent<Image>(); octetBox.raycastTarget = false; }
+                octetBox.transform.SetParent(t.transform.parent, false);
+                octetBox.transform.SetSiblingIndex(t.transform.GetSiblingIndex());   // behind the digits
+                octetBox.color = new Color(0.2f, 0.75f, 1f, 0.45f);
+            }
+            var chars = t.cachedTextGenerator.characters;
+            int start = 0;
+            for (int i = 0, dots = 0; i < f.text.Length && dots < octet; i++) if (f.text[i] == '.') { dots++; start = i + 1; }
+            int end = start; while (end < f.text.Length && char.IsDigit(f.text[end])) end++;
+            if (end >= chars.Count) { octetBox.enabled = false; return; }
+            float ppu = t.pixelsPerUnit, pad = 4f;
+            var rt = octetBox.rectTransform;
+            Vector3 a = t.rectTransform.TransformPoint(new Vector3(chars[start].cursorPos.x / ppu - pad, 0f, 0f));
+            Vector3 b = t.rectTransform.TransformPoint(new Vector3(chars[end].cursorPos.x / ppu + pad, 0f, 0f));
+            var parent = (RectTransform)rt.parent;
+            Vector2 la = parent.InverseTransformPoint(a), lb = parent.InverseTransformPoint(b);
+            Vector2 tc = parent.InverseTransformPoint(t.rectTransform.TransformPoint(t.rectTransform.rect.center));
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.localPosition = new Vector3((la.x + lb.x) * 0.5f, tc.y, 0f);
+            rt.sizeDelta = new Vector2(Mathf.Abs(lb.x - la.x), t.rectTransform.rect.height * 0.9f);
+            octetBox.enabled = true;
         }
 
         static Selectable Nearest(Canvas c, Vector3 p)

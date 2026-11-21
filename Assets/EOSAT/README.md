@@ -59,15 +59,15 @@ Everything below is built by **EOSAT > Build Combined Scene (MR tabletop + VR or
 - `WristTablet`: Face User **on** floats the iPad 13 cm above the wrist, turned toward your eyes. Turn it **off** for a rigid watch-face mount, then tune Rigid Local Position / Euler in the headset.
 - Canvas: `TelemetryReadoutUI` (data), `TabletUIController` (Antenna / Solar Panels / MR-VR toggles), `OrbitTargetToggleUI` (camera target), `ConnectionUIManager` (Source Drop-down, IP field, keypad).
 - **Connections** row = toggle: it shows or hides `Connections Panel (toggle)` through its On Value Changed → `GameObject.SetActive`.
-- **Controls guide**: `CenterEyeAnchor/VR Controls Guide (pinned top-left of view)`. Move it with its Local Position (pivot = top-left corner; default -0.40, 0.24, 0.9 m).
-- `Environment Switcher`: **VR Only Objects** = guide + iPad; **MR Only Objects** = the Connection / Flight Map / Telemetry screens, so there is no Flight Map in VR.
+- **Controls guide**: `TrackingSpace/VR Controls Guide (centred pop-up, iPad CONTROLS toggle)`. The iPad **Controls** toggle shows it; `ComfortPlacement` puts it 0.8 m straight ahead each time it opens and hides it in MR.
+- `Environment Switcher`: **VR Only Objects** = iPad; **MR Only Objects** = the Connection / Flight Map / Telemetry screens, so there is no Flight Map in VR.
 
 **2. MR Earth + mini Sun** (`Environment_MR/Globe Pivot`)
 - No `TabletopZoom` component = fixed size. `Environment Switcher > Tabletop Zoom` stays empty.
-- `Grabbable`: One Grab Transformer **and** Two Grab Transformer = `RotateInPlaceTransformer`. The globe never moves or scales. Swing Gain 1.5 is how fast it spins per hand movement. Wrist Twist adds the wrist roll.
+- `Grabbable`: One Grab Transformer **and** Two Grab Transformer = `RotateInPlaceTransformer`. Grabbing spins **only the Earth** about its polar axis (`EarthController.userSpinDeg`); the globe, orbit, satellite and mini Sun never move. Swing Gain 3.5 = degrees of spin per degree of hand movement around the axis.
 - `MrSunLight`: Marker Distance 0.9 m. The `Sun` sphere is no longer in `TelemetryOverlay > Extra Data Objects`, so it is always visible.
 
-**3. Push / pull** (each `Screen - …` root): `ObjectPullProvider` Speed **7** (was 2.5), Dead Zone **0.008** (was 0.03), wired as the Movement Provider of the screen's `RayInteractable`. Raise Speed for faster push/pull; raise Dead Zone if screens drift while held. Defaults are `PullSpeed` / `PullDeadZone` in the builder.
+**3. Laser vs grab bar** (each `Screen - …` root and the Replay window): `RayDepthOnlyProvider` is the Movement Provider of the `RayInteractable` / `DistanceGrabInteractable`. The laser can only push / pull the panel along the ray (Push Pull Gain 5, or a thumbstick) and tilt it (pitch / roll from the wrist); it never drags it sideways. Grabbing the grab bar directly (near grab) moves it freely and can drop it in a layout slot.
 
 **4. Data + deployables**
 - `Systems/Deployables Control`: Deployables = MR model, Mirrors = VR spacecraft, Hub = Telemetry. A missing hub or animator is found or warned about at runtime. Manual overrides clear on a source switch or when data returns.
@@ -91,7 +91,17 @@ Rebuild with **EOSAT > Build Combined Scene**, then run **EOSAT > Run Self-Tests
 **Deployables and commands**: Panel A (right hinge, wing +Y) and Panel B (left hinge, wing −Y) each go 0–90° from their telemetry fraction. A panel that stops between 2 % and 98 % for 10 s shows **STUCK** and leaves a replay marker. The panel rotation angle is ignored. The antenna is a binary half-wave dipole: stowed or deployed.
 - The DEPLOY buttons (PANEL A, PANEL B, PANELS A + B, ANTENNA) never move the model. They send the command on 8104, and the banner at the top of the view says it is queued to the Flight Commander. The model moves, and the banner turns green ("executed"), only when telemetry shows the deployment.
 
-**Live vs Replay**: live panels show only lat / lon / alt, deployments, battery / temperature and link / command status. **REPLAY** (Data Table button or iPad toggle) opens a head-locked panel on the right. It lists all telemetry: raw ECI, quaternion, every power field and the command / anomaly log. Below the list is a timeline with blue markers for rejects, gaps, stuck panels and a jammed antenna. Click a marker to jump to it. **LIVE** returns to the live feed.
+**Live vs Replay**: live panels show only lat / lon / alt, deployments, battery / temperature and link / command status. **REPLAY** (Data Table button or iPad toggle) opens a pop-up **Replay window** 0.8 m ahead, slightly right, with a grab bar: grab the bar to put it wherever it is easiest to read. It lists all telemetry: raw ECI, quaternion, every power field and the command / anomaly log. Below the list is a timeline with blue marker buttons for rejects, gaps, stuck panels and a jammed antenna (46 px hit area each, the tick widens and brightens on hover). Click a marker to jump to it. **LIVE** returns to the live feed.
+
+## Nov 21 comfort update
+
+- **Simulation Mode** (switch under the DEPLOY buttons, MR Telemetry screen and iPad): the model resets to stowed and the deploy buttons preview the antenna pop and Panel A / B opening to 90° locally. Nothing is sent and telemetry deploy states are ignored; the banner says SIMULATION MODE. Switching it off returns the model to the telemetry state.
+- **Command banner**: no command status on the iPad any more. The banner floats just above the MR Earth, or (VR) sits ~19° above the eye line and only glides back when you look more than 22° away (`ComfortPlacement`, lazy follow, not head-locked).
+- **MR Earth**: grab spins only the Earth about its polar axis, gain 3.5; globe and mini Sun stay fixed.
+- **Panels**: screens sit 0.9 m away (were 1.5 m) and are scaled so text looks slightly larger than before. Laser = push / pull + tilt only; grab bar = free move.
+- **IP field**: point at an octet to highlight it; stick up / down or A / X (+1) changes it.
+- **VR**: the controls guide is no longer pinned top-left; the iPad **Controls** toggle opens it centred, 0.8 m ahead. The VR Sun is 1.5x brighter and 1.3x bigger (`COMBINED_SunVR_Bright.mat`).
+- **Replay**: grabbable pop-up window instead of the head-locked right panel.
 
 **VR camera** (`OrbitalViewerLocomotion`): the left stick orbits the spacecraft, the right stick zooms. Both stop while a ray is on a panel. The iPad **VIEWPOINT** buttons:
 - FREE
@@ -109,11 +119,11 @@ NADIR and PANEL lock out above 10°/s spin (tumble lock). Set the solar panel fa
 - The body axes are shown by default. The iPad toggle "Quaternion axes" hides them (`AxesToggle`).
 
 **MR**:
-- The globe is 84 cm across, and grab-rotation gain is 2.6.
-- Fonts are larger: screens are 1.05 mm/px, the iPad is 0.33 m wide.
-- When a ray hovers a panel (`UiHoverNav`): stick flicks move between buttons, up / down on the IP field steps the selected octet, A / X clicks, and holding the stick scrolls the replay list.
+- The globe is 84 cm across, and the Earth spin gain is 3.5.
+- Screens are 0.72 mm/px at 0.9 m (Flight Map 0.52 mm/px); the iPad is 0.33 x 0.25 m.
+- When a ray hovers a panel (`UiHoverNav`): the highlight follows the pointer, stick flicks move between buttons, the IP octet under the pointer is highlighted and steps with up / down or A / X, A / X clicks buttons, and holding the stick scrolls the replay list.
 
-**Flight Map** (1.2 m wide screen):
+**Flight Map** (0.83 m wide screen at 0.9 m):
 - Time: date, UTC clock, MET, sim / rate chips.
 - Next passes: in contact or LOS-in countdown, plus a station table with AOS / LOS / max elevation.
 - Link box.

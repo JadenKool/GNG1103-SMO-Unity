@@ -1,7 +1,8 @@
 // RotateInPlaceTransformer.cs  -  Meta Interaction SDK (ITransformer)
-// MR globe: grab (hand, distance or laser) to SPIN it, never to move or scale it.
-// Swing: the grabbed surface point follows your hand / laser around the globe centre (x swingGain).
-// Twist: rolling your wrist turns the globe about the grab direction. Regrab for unlimited 360 deg turns.
+// MR globe: grab (hand, distance or laser) to SPIN the Earth about its own polar axis. Nothing else moves:
+// the globe parent, the orbit, the spacecraft and the miniature Sun stay exactly where they are.
+// The grabbed point's angle around the polar axis (x swingGain) is added to EarthController.userSpinDeg.
+// Without an EarthController it falls back to turning the grabbed object about its own up axis (still never moving it).
 // Set as both the One Grab and Two Grab Transformer on the globe's Grabbable (the builder does this).
 
 using Oculus.Interaction;
@@ -12,56 +13,47 @@ namespace Eosat.Meta
     public class RotateInPlaceTransformer : MonoBehaviour, ITransformer
     {
         [Tooltip("1 = the grabbed point follows the hand exactly; higher spins further per hand movement.")]
-        [SerializeField, Range(0.5f, 4f)] float swingGain = 1.5f;
-        [Tooltip("Rolling the wrist also turns the globe about the grab direction.")]
-        [SerializeField] bool wristTwist = true;
+        [SerializeField, Range(0.5f, 6f)] float swingGain = 1.5f;
+        [Tooltip("Earth whose body spins (userSpinDeg). Empty = spin the grabbed object about its own up axis.")]
+        [SerializeField] EarthController earth;
 
         IGrabbable grabbable;
-        Vector3 lockedPos, startDir, lockedScale;
-        Quaternion startRot, startHand;
+        Vector3 lockedPos, lockedScale, startDir;
+        Quaternion lockedRot;
+        float startSpin;
 
         public void Initialize(IGrabbable g) => grabbable = g;
+
+        Vector3 PolarAxis => earth && earth.earthBody && earth.earthBody.parent ? earth.earthBody.parent.up : lockedRot * Vector3.up;
 
         public void BeginTransform()
         {
             var t = grabbable.Transform;
-            lockedPos = t.position; lockedScale = t.localScale; startRot = t.rotation;
-            if (grabbable.GrabPoints.Count == 0) return;
-            Pose p = grabbable.GrabPoints[0];
-            startDir = p.position - lockedPos;
-            startHand = p.rotation;
+            lockedPos = t.position; lockedScale = t.localScale; lockedRot = t.rotation;
+            startSpin = earth ? earth.userSpinDeg : 0f;
+            startDir = grabbable.GrabPoints.Count > 0 ? grabbable.GrabPoints[0].position - lockedPos : Vector3.zero;
         }
 
         public void UpdateTransform()
         {
-            if (grabbable.GrabPoints.Count == 0) return;
-            Pose p = grabbable.GrabPoints[0];
-            Vector3 dir = p.position - lockedPos;
-
-            Quaternion swing = Quaternion.identity;
-            if (startDir.sqrMagnitude > 1e-6f && dir.sqrMagnitude > 1e-6f)
-            {
-                Quaternion.FromToRotation(startDir, dir).ToAngleAxis(out float ang, out Vector3 axis);
-                if (ang > 180f) ang -= 360f;
-                if (axis.sqrMagnitude > 1e-6f && !float.IsNaN(axis.x)) swing = Quaternion.AngleAxis(ang * swingGain, axis);
-            }
-            Quaternion twist = wristTwist && dir.sqrMagnitude > 1e-6f
-                ? TwistAbout(p.rotation * Quaternion.Inverse(startHand), dir.normalized) : Quaternion.identity;
-
             var t = grabbable.Transform;
-            t.SetPositionAndRotation(lockedPos, (twist * swing * startRot).normalized);
-            t.localScale = lockedScale;    // fixed size
+            float deg = 0f;
+            if (grabbable.GrabPoints.Count > 0)
+                deg = SpinAngle(startDir, grabbable.GrabPoints[0].position - lockedPos, PolarAxis) * swingGain;
+
+            if (earth) { earth.userSpinDeg = Mathf.Repeat(startSpin + deg + 180f, 360f) - 180f; t.SetPositionAndRotation(lockedPos, lockedRot); }
+            else t.SetPositionAndRotation(lockedPos, Quaternion.AngleAxis(deg, PolarAxis) * lockedRot);
+            t.localScale = lockedScale;    // fixed size, fixed place
         }
 
         public void EndTransform() { }
 
-        // Twist part of q around axis (swing-twist decomposition).
-        static Quaternion TwistAbout(Quaternion q, Vector3 axis)
+        /// <summary>Signed angle (deg) from a to b measured around axis, ignoring the components along the axis.</summary>
+        public static float SpinAngle(Vector3 a, Vector3 b, Vector3 axis)
         {
-            Vector3 proj = Vector3.Project(new Vector3(q.x, q.y, q.z), axis);
-            var tw = new Quaternion(proj.x, proj.y, proj.z, q.w);
-            float m = Mathf.Sqrt(tw.x * tw.x + tw.y * tw.y + tw.z * tw.z + tw.w * tw.w);
-            return m < 1e-6f ? Quaternion.identity : new Quaternion(tw.x / m, tw.y / m, tw.z / m, tw.w / m);
+            Vector3 pa = Vector3.ProjectOnPlane(a, axis), pb = Vector3.ProjectOnPlane(b, axis);
+            if (pa.sqrMagnitude < 1e-8f || pb.sqrMagnitude < 1e-8f) return 0f;   // grabbed right at a pole
+            return Vector3.SignedAngle(pa, pb, axis);
         }
     }
 }
